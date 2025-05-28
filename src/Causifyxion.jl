@@ -137,7 +137,29 @@ nrand!(rv::CausalVariable...; n = 20) = reduce(hcat, 1:n .|> x -> randandreset!.
 """
 dependson(parent::CausalVariable, child::CausalVariable) = isparent(parent, child)
 
+macro collect_causal_variables(expr)
+    syms = leaves(expr)
+    quoted_vec = Expr(:vect, syms...)
+    _results = gensym(:results)
+    _val = gensym(:val)
+    quote
+        $_results = CausalVariable[]
+        for $_val in $quoted_vec 
+            $_val isa CausalVariable && push!($_results, $_val)
+        end 
+        $_results
+    end |> esc
+end
 
+macro causify(expr)
+    _causal_variables = gensym(:causal_variables)
+    quote 
+        $_causal_variables = @collect_causal_variables $expr
+        causify($_causal_variables...) do 
+
+        end 
+    end 
+end 
 
 # The following rules apply
     # 1) x = @causify expr 
@@ -203,18 +225,20 @@ y
 x
 rand!(y)
 
-filter(x -> :($(esc(x) isa CausalVariable)), leaves(:(x + y)) |> collect)
-map(x -> :($(x)), leaves(:(x + y)) |> collect)
 
-function _unwrap_causal_variable(expr)
-    if expr isa Symbol
-        return :(_getvalue($(esc(expr))))
-    elseif expr isa Expr && expr.head == :call
-        return Expr(:call, expr.args[1], map(_unwrap_causal_variable, expr.args[2:end])...)
-    else
-        return expr
-    end
-end
+
+# filter(x -> :($(esc(x) isa CausalVariable)), leaves(:(x + y)) |> collect)
+# map(x -> :($(esc(x))), leaves(:(x + y)) |> collect)
+
+# function _unwrap_causal_variable(expr)
+#     if expr isa Symbol
+#         return :(_getvalue($(esc(expr))))
+#     elseif expr isa Expr && expr.head == :call
+#         return Expr(:call, expr.args[1], map(_unwrap_causal_variable, expr.args[2:end])...)
+#     else
+#         return expr
+#     end
+# end
 
 # macro setknown!(exs...)
 #     return quote (x -> begin
