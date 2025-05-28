@@ -1,14 +1,15 @@
-"""
-Causifyxion is a library creating and sampling from causally-related random variables.
-"""
+# """
+# Causifyxion is a library creating and sampling from causally-related random variables.
+# """
 # module Causifyxion
 # using Distributions, Taproots, ForwardDiff, QuadGK
 # using MacroTools: @capture
 
 # include("/home/tyronc/Nextcloud/Projects/packages/Taproots.jl/Taproots.jl/src/Taproots.jl")
-include(joinpath(dirname(dirname(dirname(@__DIR__))), "Taproots.jl/Taproots.jl/src/Taproots.jl"))
-using .Taproots
+# include(joinpath(dirname(dirname(dirname(@__DIR__))), "Taproots.jl/Taproots.jl/src/Taproots.jl"))
+# using .Taproots
 
+using Taproots
 using SumTypes, Distributions
 
 export getvalue, setvalue!, 
@@ -137,29 +138,129 @@ nrand!(rv::CausalVariable...; n = 20) = reduce(hcat, 1:n .|> x -> randandreset!.
 """
 dependson(parent::CausalVariable, child::CausalVariable) = isparent(parent, child)
 
+macro causify(args...)
+    _causify(args...)
+end 
+
 macro collect_causal_variables(expr)
-    syms = leaves(expr)
+    syms = leaves(expr) |> collect
     quoted_vec = Expr(:vect, syms...)
+    _syms = gensym(:syms)
     _results = gensym(:results)
+    _sym = gensym(:sym)
     _val = gensym(:val)
     quote
+        $_syms = Symbol[]
         $_results = CausalVariable[]
-        for $_val in $quoted_vec 
-            $_val isa CausalVariable && push!($_results, $_val)
+        for ($_sym, $_val) in zip($syms, $quoted_vec)
+            if $_val isa CausalVariable 
+                push!($_syms, $_sym)
+                push!($_results, $_val)
+            end 
         end 
-        $_results
+        ($_syms, $_results)
     end |> esc
 end
 
-macro causify(expr)
-    _causal_variables = gensym(:causal_variables)
-    quote 
-        $_causal_variables = @collect_causal_variables $expr
-        causify($_causal_variables...) do 
-
-        end 
+function _causify(args...)
+    settings, expr = _settings_and_expr(args...)
+    if expr.head == :block 
+        return _causify_block(expr, settings)
+    elseif expr.head == :(=) 
+        return _causify_assignment(expr, settings)
+    elseif expr isa Expr 
+        return _causify_expr(expr, settings)
+    else 
+        return expr 
     end 
 end 
+
+function _causify_block(expr, settings)
+    new_exprs = Expr[]
+    for e in expr.args 
+        if expr.head == :(=) 
+            push!(new_exprs, _causify_assignment(e, settings))
+        elseif e.head != :block 
+            push!(new_exprs, _causify_expr(e, settings))
+        end 
+    end 
+    return Expr(:block, new_exprs...)
+end 
+
+function _causify_assignment(expr, settings)
+    args = _causify_expr(expr.args[2], settings)
+    return :($(esc(expr.args[1])) = $args)
+end
+
+function _causify_expr(expr, settings)
+    quote 
+        syms, vals = @collect_causal_variables($expr)
+        if isempty(syms) && :constants ∉ $settings
+            $expr
+        else 
+            local arg_tuple = Expr(:tuple, syms...)
+            local func = Expr(:->, arg_tuple, $(Meta.quot(expr)))
+            causify(func |> eval, vals...)
+        end 
+    end 
+end
+
+function _settings_and_expr(args...)
+    settings = Set{Symbol}()
+    expr = args[end]
+    for arg in args
+        if arg isa Symbol push!(settings, arg) end 
+        if arg isa Expr 
+            expr = arg
+            break 
+        end 
+    end 
+    return settings, expr
+end 
+
+
+x = causify(Normal(0, 1))
+eltype(x)
+y = causify(x) do x
+    x^2
+end 
+
+
+
+@collect_causal_variables x + y + 1 
+
+
+@causify x + y + 1 
+@causify z = x + y 
+
+# @causify begin 
+#     a = x + y 
+#     b = x + z 
+#     c = 15
+#     d = 15 + 19 
+#     e = d + a
+# end 
+
+z
+
+
+_settings_and_expr(:constants, :(x + y + 1))
+
+randandreset!(y)
+
+
+syms, vals = @collect_causal_variables x + y + 1 
+syms
+
+
+z = _causify_expr(:(x + y + 1), Set()) |> eval
+
+rand!(z)
+rand!(y)
+rand!(x)
+
+
+
 
 # The following rules apply
     # 1) x = @causify expr 
@@ -213,18 +314,6 @@ end
 #     end |> esc
 
 # end
-
-
-x = causify(Normal(0, 1))
-eltype(x)
-y = causify(x) do x
-    x^2
-end 
-
-y
-x
-rand!(y)
-
 
 
 # filter(x -> :($(esc(x) isa CausalVariable)), leaves(:(x + y)) |> collect)
