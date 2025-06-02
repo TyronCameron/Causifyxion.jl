@@ -1,2 +1,9 @@
+name = "Causifyxion"
+uuid = "c7c60c5c-2ec4-4fbb-884a-28bd8a4a87ad"
+authors = ["TyronCameron <tyron.luke.cameron@gmail.com>"]
+version = "0.1.0"
+
 [deps]
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+SumTypes = "8e1ec7a9-0e02-4297-b0fe-6433085c89f2"
+Taproots = "6cca9763-2e92-47b9-bf40-ccfe60418944"

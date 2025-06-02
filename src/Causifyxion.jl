@@ -4,12 +4,14 @@ Causifyxion is a library creating and sampling from causally-related random vari
 module Causifyxion
 
 using Taproots
-using SumTypes, Distributions
+using SumTypes
+using Distributions: Distribution
 
-export getvalue, setvalue!, 
+export CausalVariable,
+    ValueUnknownError, getvalue, setvalue!, 
     isknown, isunknown,
     dependson, 
-    rand!, reset!, randandreset!, nrand!,
+    rand!, reset!, resetandrand!, nrand!,
     causify, @causify
 
 @sum_type Possible{T} begin
@@ -81,12 +83,13 @@ causify(rand::Function, ::Type{T}, dependson::CausalVariable...) where T = Causa
 causify(distr::Distribution) = causify(() -> rand(distr), eltype(distr))
 function causify(rand::Function, dependson::CausalVariable...) 
     types = Union{Base.return_types(rand, eltype.(dependson))...}
-    println(types)
     if types <: Union{} 
         types = Any 
     end 
     causify(rand, types, dependson...)
 end 
+
+abstract type ValueUnknownError <: Exception end 
 
 """
     getvalue(causalvariable::CausalVariable)
@@ -95,7 +98,7 @@ Returns the value that is wrapped within the causalvariable.
 """
 function getvalue(causalvariable::CausalVariable) 
     @cases causalvariable.value begin 
-        Unknown => error("Can't get the value of an unknown causal variable! Perhaps call rand!(your_variable) first.")
+        Unknown => error(ValueUnknownError, " Can't get the value of an unknown causal variable! Perhaps call rand!(your_variable) first.")
         Known(x) => x
     end 
 end
@@ -190,8 +193,6 @@ function reset!(rv::CausalVariable)
     return rv
 end
 
-# TODO: this one should get a nice way to apply any intervention function first! 
-# TODO: need to decide if I want to reset! first. Now that we're not eagerly evaluating the suckers, I think that might be better
 """
     resetandrand!([intervention_function::Function, ]rv::CausalVariable...)
 
@@ -374,10 +375,7 @@ macro collect_causal_variables(expr)
 end
 
 function _causify(args...)
-    @info args
-    @info _settings_and_expr(args...)
     settings, expr = _settings_and_expr(args...)
-    @info settings
     if expr.head == :block 
         return _causify_block(expr, settings)
     elseif expr.head == :(=) 
