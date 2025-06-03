@@ -80,6 +80,7 @@ end
 
     mat = nrand!(x, y) # first column = 5 fresh samples of x, second column = 5 fresh samples of y; those samples are consistent in each row
 
+    @test mat isa Matrix
     @test all(mat[:,1] .^ 2 .== mat[:,2]) # every value in column 1 squared equals every value in column 2
 
     rigged_matrix = nrand!(x, y) do
