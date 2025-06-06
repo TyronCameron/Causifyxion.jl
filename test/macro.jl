@@ -21,6 +21,15 @@
         causal_var = foo()
         @test 10*rand!(x) ≈ rand!(causal_var)
     end 
+
+    @testset "Nested otherwise scoped variables" begin
+        h = 25
+        a = causify(Normal(0,1))
+        b = @causify a^2 + abs(rand(Normal(0,1))) + h
+        @test b isa CausalVariable
+        @test rand!(b) > rand!(a)^2
+    end
+
 end 
 
 @testset "Causify assignment" begin
@@ -45,6 +54,7 @@ end
         causal_var = foo()
         @test 10*rand!(x) ≈ rand!(causal_var)
     end 
+
 end
 
 @testset "Causify whole scope" begin
@@ -61,16 +71,16 @@ end
         @test !(d isa CausalVariable)
         @test rand!(e) isa Float64
 
-        # @causify :constants begin
-        #     x = causify(Normal(0,1))
-        #     y = x^2
-        #     d = 15
-        #     e = d + y 
-        # end
+        @causify :constants begin
+            x = causify(Normal(0,1))
+            y = x^2
+            d = 15
+            e = d + y 
+        end
 
-        # @test e isa CausalVariable
-        # @test d isa CausalVariable
-        # @test rand!(e) isa Float64
+        @test e isa CausalVariable
+        @test d isa CausalVariable
+        @test rand!(e) isa Float64
     end
 
 
@@ -93,19 +103,19 @@ end
         @test getvalue(e) ≈ rand!(e)
     end
 
-    # @testset "Contains nested scope" begin
-    #     Causifyxion._causify_expr(quote
-    #         x = causify(Normal(0,1))
-    #         y = x^2
-    #         d = 15
-    #         e = begin 
-    #             g = 100
-    #             g*(d + y)
-    #         end 
-    #     end, Set(); __module__ = @__MODULE__) 
+    @testset "Contains nested scope" begin
+        @causify begin 
+            x = causify(Normal(0,1))
+            y = x^2
+            d = 15
+            e = begin 
+                g = 100
+                g*(d + y)
+            end 
+        end
 
-    #     @test e isa CausalVariable
-    #     @test !isdefined(@__MODULE__, :f)
+        @test e isa CausalVariable
+        @test !isdefined(@__MODULE__, :f)
     
-    # end
+    end
 end

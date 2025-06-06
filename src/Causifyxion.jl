@@ -348,7 +348,17 @@ end
 ```
 """
 macro causify(args...)
-    _causify(args...; __module__ = esc(:(@__MODULE__)))
+    settings, expr = _settings_and_expr(args...)
+    if expr isa Expr && expr.head == :block 
+        new_expr = causify_block(expr, settings; __module__ = __module__) |> esc
+    elseif expr isa Expr && expr.head == :(=) 
+        new_expr = causify_assignment(expr, settings; __module__ = __module__) |> esc
+    elseif expr isa Expr 
+        new_expr = causify_expr(expr, settings; __module__ = __module__) |> esc
+    else 
+        new_expr = expr 
+    end 
+    return new_expr
 end 
 
 # the map esc seems to cause problems at global scope 
@@ -356,7 +366,7 @@ end
 # so don't export this one 
 macro collect_causal_variables(expr)
     syms = leaves(expr) |> collect
-    quoted_vec = Expr(:vect, map(s -> esc(s), syms)...)
+    quoted_vec = Expr(:vect, map(s -> s, syms)...)
     _syms = gensym(:syms)
     _results = gensym(:results)
     _sym = gensym(:sym)
@@ -374,52 +384,40 @@ macro collect_causal_variables(expr)
     end |> esc
 end
 
-function _causify(args...; __module__ = @__MODULE__)
-    settings, expr = _settings_and_expr(args...)
-    if expr.head == :block 
-        return _causify_block(expr, settings; __module__ = __module__)
-    elseif expr.head == :(=) 
-        return _causify_assignment(expr, settings; __module__ = __module__)
-    elseif expr isa Expr 
-        return _causify_expr(expr, settings; __module__ = __module__)
-    else 
-        return expr 
-    end 
-end 
-
-function _causify_block(expr, settings; __module__ = @__MODULE__)
+function causify_block(expr, settings; __module__ = @__MODULE__)
     new_exprs = []
-    for e in expr.args
+    for (i,e) in enumerate(expr.args)
         if !(e isa Expr) 
             push!(new_exprs, e) 
             continue
         end 
-        if e.head == :(=) 
-            push!(new_exprs, _causify_assignment(e, settings; __module__ = __module__))
-        elseif e isa Expr 
-            push!(new_exprs, _causify_expr(e, settings; __module__ = __module__))
+        if e.head == :(=) || i == length(expr.args)
+            push!(new_exprs, :($_causify(esc($e))))
         end 
     end 
     return Expr(:block, new_exprs...)
 end 
 
-function _causify_assignment(expr, settings; __module__ = @__MODULE__)
-    args = _causify_expr(expr.args[2], settings; __module__ = __module__)
+function causify_assignment(expr, settings; __module__ = @__MODULE__)
+    args = causify_expr(expr.args[2], settings; __module__ = __module__)
     return :($(esc(expr.args[1])) = $args)
 end
 
-function _causify_expr(expr, settings; __module__ = @__MODULE__)
-    println(settings)
+function causify_expr(expr, settings; __module__ = @__MODULE__)
     quote 
         syms, vals = @collect_causal_variables($expr)
-        if isempty(syms) && :constants ∉ $settings
-            $(esc(expr))
+        if isempty(syms) && :constants ∉ settings
+            expr
         else 
             local arg_tuple = Expr(:tuple, syms...)
-            local func = Expr(:->, arg_tuple, $(Meta.quot(expr)))
-            causify(Core.eval($(__module__), func), vals...)
+            local func = @create_function($arg_tuple, $expr)
+            causify(func, vals...)
         end 
     end 
+end
+
+macro create_function(args, expr)
+    Expr(:->, args, expr)
 end
 
 function _settings_and_expr(args...)
