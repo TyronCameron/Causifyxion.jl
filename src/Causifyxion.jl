@@ -1,7 +1,7 @@
 """
 Causifyxion is a library creating and sampling from causally-related random variables.
 """
-module Causifyxion
+# module Causifyxion
 
 using Taproots
 using SumTypes
@@ -350,23 +350,39 @@ end
 macro causify(args...)
     settings, expr = _settings_and_expr(args...)
     if expr isa Expr && expr.head == :block 
-        new_expr = causify_block(expr, settings; __module__ = __module__) |> esc
+        new_expr = causify_block(expr, settings) |> esc
     elseif expr isa Expr && expr.head == :(=) 
-        new_expr = causify_assignment(expr, settings; __module__ = __module__) |> esc
+        new_expr = causify_assignment(expr, settings) |> esc
     elseif expr isa Expr 
-        new_expr = causify_expr(expr, settings; __module__ = __module__) |> esc
+        new_expr = causify_expr(expr, settings)
     else 
         new_expr = expr 
     end 
     return new_expr
 end 
 
-# the map esc seems to cause problems at global scope 
-# internally seems fine
-# so don't export this one 
+# function causify_block(expr, settings; __module__ = @__MODULE__)
+#     new_exprs = []
+#     for (i,e) in enumerate(expr.args)
+#         if !(e isa Expr) 
+#             push!(new_exprs, e) 
+#             continue
+#         end 
+#         if e.head == :(=) || i == length(expr.args)
+#             push!(new_exprs, :($_causify(esc($e))))
+#         end 
+#     end 
+#     return Expr(:block, new_exprs...)
+# end 
+
+# function causify_assignment(expr, settings; __module__ = @__MODULE__)
+#     args = causify_expr(expr.args[2], settings; __module__ = __module__)
+#     return :($(esc(expr.args[1])) = $args)
+# end
+
 macro collect_causal_variables(expr)
     syms = leaves(expr) |> collect
-    quoted_vec = Expr(:vect, map(s -> s, syms)...)
+    quoted_vec = Expr(:vect, map(s -> esc(s), syms)...)
     _syms = gensym(:syms)
     _results = gensym(:results)
     _sym = gensym(:sym)
@@ -380,43 +396,69 @@ macro collect_causal_variables(expr)
                 push!($_results, $_val)
             end 
         end 
-        ($_syms, $_results)
+        (($_syms...,), ($_results...,))
     end |> esc
 end
 
-function causify_block(expr, settings; __module__ = @__MODULE__)
-    new_exprs = []
-    for (i,e) in enumerate(expr.args)
-        if !(e isa Expr) 
-            push!(new_exprs, e) 
-            continue
-        end 
-        if e.head == :(=) || i == length(expr.args)
-            push!(new_exprs, :($_causify(esc($e))))
-        end 
+
+macro args_vals_map(expr)
+    _syms = gensym(:syms)
+    _vals = gensym(:vals)
+    _args = gensym(:args)
+    _mapper = gensym(:mapper)
+    mapper = Dict{Symbol, Symbol}()
+    quote
+        $_syms, $_vals = @collect_causal_variables $expr
+        map(s -> push!($mapper, s => gensym(s)), $_syms)
+        $_args = Expr(:tuple, values($mapper)...)
+        $_mapper = $mapper
+        ($_args, $_vals, $_mapper)
     end 
-    return Expr(:block, new_exprs...)
 end 
 
-function causify_assignment(expr, settings; __module__ = @__MODULE__)
-    args = causify_expr(expr.args[2], settings; __module__ = __module__)
-    return :($(esc(expr.args[1])) = $args)
+
+function create_function(expr, args)
+    Expr(:->, args, expr)
 end
 
-function causify_expr(expr, settings; __module__ = @__MODULE__)
-    quote 
-        syms, vals = @collect_causal_variables($expr)
-        if isempty(syms) && :constants ∉ settings
-            expr
-        else 
-            local arg_tuple = Expr(:tuple, syms...)
-            local func = @create_function($arg_tuple, $expr)
-            causify(func, vals...)
-        end 
-    end 
+# function causify_expr(expr, settings)
+#     _args = gensym(:args)
+#     _rewritten = gensym(:rewritten)
+#     rewrite = mapable -> leafmap!(x -> get(mapable, x, x), expr)
+#     quote 
+#         (() -> begin 
+#             $_args, vals, mapper = @args_vals_map $expr
+#             $_rewritten = $(rewrite)(mapper)
+#             func = $(Expr(:->, _args, _rewritten))
+#             causify(func, vals...)
+#         end)()
+#     end 
+# end
+
+macro causify_expr(expr)
+    _args = gensym(:args)
+    _vals = gensym(:vals)
+    _mapper = gensym(:mapper)
+    _rewritten = gensym(:rewritten)
+    _original = gensym(:original)
+
+    quote
+        (() -> begin
+            $_args, $_vals, $_mapper = @args_vals_map $(esc(expr))
+            $_original = $(QuoteNode(expr))
+            $_rewritten = leafmap!(x -> haskey($_mapper, x) ? Expr(:$, get(mapper, x, x)) : x, $_original)
+            func = $(Expr(:->, _args, _rewritten))
+            causify(func, $_vals...)
+        end)()
+    end
 end
 
-macro create_function(args, expr)
+
+
+# leafmap!(x -> get(mapper, x, x), $(Meta.quot(expr)))
+Expr(:->, Expr(:tuple, :a, :b), Meta.quot(:(a + b)))
+
+macro create_function(expr, args)
     Expr(:->, args, expr)
 end
 
@@ -434,4 +476,4 @@ function _settings_and_expr(args...)
     return settings, expr
 end 
 
-end  # module Causifyxion
+# end  # module Causifyxion
