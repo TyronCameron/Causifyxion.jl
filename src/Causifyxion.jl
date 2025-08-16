@@ -1,6 +1,7 @@
-"""
-Causifyxion is a library creating and sampling from causally-related random variables.
-"""
+
+# """
+# Causifyxion is a library creating and sampling from causally-related random variables.
+# """
 # module Causifyxion
 
 using Taproots
@@ -14,10 +15,24 @@ export CausalVariable,
     rand!, reset!, resetandrand!, nrand!,
     causify, @causify
 
+
+
+"""
+    Possible{T}
+
+A sum type including `Unknown` as well as `Known(x::T)`. 
+"""
 @sum_type Possible{T} begin
     Unknown
     Known{T}(::T)
 end 
+
+"""
+    ValueUnknownError
+
+You tried to get the value of a CausalVariable that has not yet been sampled. 
+"""
+abstract type ValueUnknownError <: Exception end 
 
 """
     CausalVariable{T}
@@ -89,19 +104,34 @@ function causify(rand::Function, dependson::CausalVariable...)
     causify(rand, types, dependson...)
 end 
 
-abstract type ValueUnknownError <: Exception end 
+get_and_incr(itr, state) where T = (itr[state], state + 1)
+function merge_tuples(dependson, args)
+    args_state = 1
+    map(dependson) do d
+        if !(d isa CausalVariable) return d end 
+        r, args_state = get_and_incr(args, args_state)
+        r
+    end 
+end 
+function _causify_all(rand::Function, dependson...) 
+    causals = filter(x -> x isa CausalVariable, dependson)
+    return causify(
+        (args...) -> rand(merge_tuples(dependson, args)...),
+        causals...
+    )
+end 
+
 
 """
     getvalue(causalvariable::CausalVariable)
 
 Returns the value that is wrapped within the causalvariable.
 """
-function getvalue(causalvariable::CausalVariable) 
-    @cases causalvariable.value begin 
-        Unknown => error(ValueUnknownError, " Can't get the value of an unknown causal variable! Perhaps call rand!(your_variable) first.")
-        Known(x) => x
-    end 
+getvalue(causalvariable::CausalVariable) = @cases causalvariable.value begin 
+    Unknown => error(ValueUnknownError, " Can't get the value of an unknown value! Perhaps call rand!(your_variable) first.")
+    Known(x) => x
 end
+
 
 """
     setvalue!(causalvariable::CausalVariable{T}, value::T)
@@ -109,7 +139,7 @@ end
 Sets the value that is wrapped within the causalvariable. `value` must be of type `T` where `T` is the eltype of `causalvariable`. 
 """
 function setvalue!(causalvariable::CausalVariable{T}, value::T) where T
-    causalvariable.value = Known{eltype(causalvariable)}(value)
+    causalvariable.value = Known{T}(value)
     return causalvariable
 end
 
@@ -118,11 +148,9 @@ end
 
 `true` is the causalvariable has a known value (i.e. has been previously sampled). `false` otherwise.
 """ 
-function isknown(causalvariable::CausalVariable)
-    @cases causalvariable.value begin
-        Unknown => false 
-        Known(x) => true
-    end
+isknown(causalvariable::CausalVariable) = @cases causalvariable.value begin
+    Unknown => false 
+    Known(x) => true
 end
 
 """
@@ -132,6 +160,11 @@ end
 """
 isunknown(causalvariable::CausalVariable) = !isknown(causalvariable)
 
+"""
+    setunknown!(causalvariable)
+
+Sets the value of the causal variable back to `Unknown`.
+"""
 function setunknown!(causalvariable)
     causalvariable.value = Unknown
     return causalvariable
@@ -150,7 +183,7 @@ x = causify(Uniform(0,1))
 first_sample = rand!(x)
 second_sample = rand!(x)
 
-@assert first_sample == second_sample # note that rand! is not a completely fresh sample. It keeps known values around. 
+@assert first_sample == second_sample # note that rand! is not a completely fresh sample. It keeps known values around until you set the CausalVariable to `Unknown`. 
 ```
 
 `rand!` recursively modifies all CausalVariables beneath it, by design, because it samples them all. 
@@ -167,7 +200,9 @@ end
 """
     reset!(rv::CausalVariable...)
 
-Makes each of the `causalvariables` supplied unknown and **recursively** does this for all children. 
+In short, this makes the `CausalVariable` forget its current sample so you can resample the CausalVariable. 
+Makes each of the `causalvariables` supplied `Unknown` and **recursively** does this for all children. 
+To do this non-recursively, rather use `setunknown!`. 
 
 Example: 
 
@@ -269,6 +304,7 @@ dependson(parent::CausalVariable, child::CausalVariable) = isparent(parent, chil
 
 This wraps normal Julia expressions inside a `causify()` function, and is the most convenient way to create causal variables.
 This macro does not work for Distributions, for which you must use `causify()`.
+At the moment there may or may not be a heinous abomination of code making this work. 
 
 ```julia
 u = @causify Uniform(0,1) # ❌ usually not going to do what you want (unless you are wanted to parameterise the distribution itself with causal variables)
@@ -347,19 +383,40 @@ end
 @assert d isa CausalVariable && eltype(d) <: Int
 ```
 """
-macro causify(args...)
-    settings, expr = _settings_and_expr(args...)
-    if expr isa Expr && expr.head == :block 
-        new_expr = causify_block(expr, settings) |> esc
-    elseif expr isa Expr && expr.head == :(=) 
-        new_expr = causify_assignment(expr, settings) |> esc
-    elseif expr isa Expr 
-        new_expr = causify_expr(expr, settings)
-    else 
-        new_expr = expr 
-    end 
-    return new_expr
+macro causify(expr)
+    @assert expr isa Symbol || (expr isa Expr && expr.head == :call) """Pls try again later"""
+    sym_tuple = Expr(:tuple, filter(e -> e isa Symbol, collect(leaves(expr)))...)
+    quote 
+        causify_all($sym_tuple -> $expr, $sym_tuple...)
+    end |> esc
 end 
+# macro causify(args...)
+#     settings, expr = _settings_and_expr(args...)
+#     if expr isa Expr && expr.head == :block 
+#         new_expr = causify_block(expr, settings) |> esc
+#     elseif expr isa Expr && expr.head == :(=) 
+#         new_expr = causify_assignment(expr, settings) |> esc
+#     elseif expr isa Expr 
+#         new_expr = causify_expr(expr, settings)
+#     else 
+#         new_expr = expr 
+#     end 
+#     return new_expr
+# end 
+
+# function _settings_and_expr(args...)
+#     settings = Set{Symbol}()
+#     expr = args[end]
+#     for arg in args
+#         if arg isa Symbol push!(settings, arg) end 
+#         if (arg isa QuoteNode && arg.value isa Symbol) push!(settings, arg.value) end 
+#         if arg isa Expr 
+#             expr = arg
+#             break 
+#         end 
+#     end 
+#     return settings, expr
+# end 
 
 # function causify_block(expr, settings; __module__ = @__MODULE__)
 #     new_exprs = []
@@ -380,100 +437,7 @@ end
 #     return :($(esc(expr.args[1])) = $args)
 # end
 
-macro collect_causal_variables(expr)
-    syms = leaves(expr) |> collect
-    quoted_vec = Expr(:vect, map(s -> esc(s), syms)...)
-    _syms = gensym(:syms)
-    _results = gensym(:results)
-    _sym = gensym(:sym)
-    _val = gensym(:val)
-    quote
-        $_syms = Symbol[]
-        $_results = CausalVariable[]
-        for ($_sym, $_val) in zip($syms, $quoted_vec)
-            if $_val isa CausalVariable 
-                push!($_syms, $_sym)
-                push!($_results, $_val)
-            end 
-        end 
-        (($_syms...,), ($_results...,))
-    end |> esc
-end
-
-
-macro args_vals_map(expr)
-    _syms = gensym(:syms)
-    _vals = gensym(:vals)
-    _args = gensym(:args)
-    _mapper = gensym(:mapper)
-    mapper = Dict{Symbol, Symbol}()
-    quote
-        $_syms, $_vals = @collect_causal_variables $expr
-        map(s -> push!($mapper, s => gensym(s)), $_syms)
-        $_args = Expr(:tuple, values($mapper)...)
-        $_mapper = $mapper
-        ($_args, $_vals, $_mapper)
-    end 
-end 
-
-
-function create_function(expr, args)
-    Expr(:->, args, expr)
-end
-
-# function causify_expr(expr, settings)
-#     _args = gensym(:args)
-#     _rewritten = gensym(:rewritten)
-#     rewrite = mapable -> leafmap!(x -> get(mapable, x, x), expr)
-#     quote 
-#         (() -> begin 
-#             $_args, vals, mapper = @args_vals_map $expr
-#             $_rewritten = $(rewrite)(mapper)
-#             func = $(Expr(:->, _args, _rewritten))
-#             causify(func, vals...)
-#         end)()
-#     end 
-# end
-
-macro causify_expr(expr)
-    _args = gensym(:args)
-    _vals = gensym(:vals)
-    _mapper = gensym(:mapper)
-    _rewritten = gensym(:rewritten)
-    _original = gensym(:original)
-
-    quote
-        (() -> begin
-            $_args, $_vals, $_mapper = @args_vals_map $(esc(expr))
-            $_original = $(QuoteNode(expr))
-            $_rewritten = leafmap!(x -> haskey($_mapper, x) ? Expr(:$, get(mapper, x, x)) : x, $_original)
-            func = $(Expr(:->, _args, _rewritten))
-            causify(func, $_vals...)
-        end)()
-    end
-end
-
-
-
-# leafmap!(x -> get(mapper, x, x), $(Meta.quot(expr)))
-Expr(:->, Expr(:tuple, :a, :b), Meta.quot(:(a + b)))
-
-macro create_function(expr, args)
-    Expr(:->, args, expr)
-end
-
-function _settings_and_expr(args...)
-    settings = Set{Symbol}()
-    expr = args[end]
-    for arg in args
-        if arg isa Symbol push!(settings, arg) end 
-        if (arg isa QuoteNode && arg.value isa Symbol) push!(settings, arg.value) end 
-        if arg isa Expr 
-            expr = arg
-            break 
-        end 
-    end 
-    return settings, expr
-end 
-
 # end  # module Causifyxion
+
+
+
