@@ -11,6 +11,10 @@ Features:
 
 ## Todo
 
+- change `rand!` to `simulate!`. This wording aligns better with reactivity, caching, etc
+
+## Todo but out of scope for now 
+
 - Need a nice way to do 
 
 Would be nice to have a register as well so that you can access those nodes at constant time later.

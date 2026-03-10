@@ -32,7 +32,9 @@ end
 
 @testset begin 
     x = causify(Normal(0,1))
-    y = @causify x^2
+    y = causify(x) do x 
+        x^2
+    end 
     
     @test_throws "Perhaps call rand!" begin 
         getvalue(x)
@@ -61,7 +63,9 @@ end
 
 @testset "Reset and rand" begin
     x = causify(Uniform(0,1))
-    y = @causify x^2
+    y = causify(x) do x 
+        x^2
+    end 
     fresh_sample1 = resetandrand!(y)
     fresh_sample2 = resetandrand!(y)
 
@@ -76,7 +80,9 @@ end
 
 @testset "nrand!" begin
     x = causify(Uniform(0,1))
-    y = @causify x^2 # define y as x^2
+    y = causify(x) do x 
+        x^2
+    end 
 
     mat = nrand!(x, y) # first column = 5 fresh samples of x, second column = 5 fresh samples of y; those samples are consistent in each row
 

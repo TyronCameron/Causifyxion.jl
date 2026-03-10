@@ -71,8 +71,8 @@ end
         @test !(d isa CausalVariable)
         @test rand!(e) isa Float64
 
+        x = causify(Normal(0,1))
         @causify :constants begin
-            x = causify(Normal(0,1))
             y = x^2
             d = 15
             e = d + y 
@@ -116,6 +116,6 @@ end
 
         @test e isa CausalVariable
         @test !isdefined(@__MODULE__, :f)
-    
+        @assert false "This last test above looks broken but valuable... might be worth checking it out"
     end
 end

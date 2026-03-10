@@ -1,12 +1,12 @@
 using Documenter
-using Causifyx
+using Causifyxion
 
 push!(LOAD_PATH,"../src/")
 
 makedocs(
-    sitename = "Causifyx",
+    sitename = "Causifyxion",
     format = Documenter.HTML(),
-    modules = [Causifyx],
+    modules = [Causifyxion],
     pages = [
         "Index" => "index.md",
         "API" => "api.md"
@@ -14,6 +14,6 @@ makedocs(
 )
 
 deploydocs(
-    repo = "github.com/TyronCameron/Causifyx.jl.git",
+    repo = "github.com/TyronCameron/Causifyxion.jl.git",
     devbranch = "main"
 )

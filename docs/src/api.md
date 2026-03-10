@@ -1,19 +1,19 @@
-# Causifyx API
+# Causifyxion API
 
 ```@docs
-Causifyx
+Causifyxion
 ```
 
 ## Module Index
 
 ```@index
-Modules = [Causifyx]
+Modules = [Causifyxion]
 Order   = [:constant, :type, :function, :macro]
 ```
 
 ## API
 
 ```@autodocs
-Modules = [Causifyx]
+Modules = [Causifyxion]
 Order   = [:constant, :type, :function, :macro]
 ```
