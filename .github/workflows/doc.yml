@@ -1,4 +1,4 @@
-name: Run tests
+name: Create docs
 on:
   pull_request:
     branches:

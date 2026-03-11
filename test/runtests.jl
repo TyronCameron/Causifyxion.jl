@@ -1,9 +1,7 @@
-# include(joinpath(dirname(@__DIR__), "src", "Causifyxion.jl"))
-# using .Causifyxion
 using Causifyxion
-using Test, Distributions
-# using Aqua, JET
+using Test, Distributions, Aqua
 
 include(joinpath(@__DIR__, "causify.jl"))
 include(joinpath(@__DIR__, "macro.jl"))
 
+Aqua.test_all(Causifyxion)
