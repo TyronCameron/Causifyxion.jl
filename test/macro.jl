@@ -5,7 +5,7 @@
 
     @test y isa CausalVariable
 
-    rand!(y)
+    resolve!(y)
 
     @test getvalue(y) == getvalue(x)^2
 
@@ -19,7 +19,7 @@
         end
 
         causal_var = foo()
-        @test 10*rand!(x) ≈ rand!(causal_var)
+        @test 10*resolve!(x) ≈ resolve!(causal_var)
     end 
 
     @testset "Nested otherwise scoped variables" begin
@@ -27,7 +27,7 @@
         a = causify(Normal(0,1))
         b = @causify a^2 + abs(rand(Normal(0,1))) + h
         @test b isa CausalVariable
-        @test rand!(b) > rand!(a)^2
+        @test resolve!(b) > resolve!(a)^2
     end
 
 end 
@@ -38,7 +38,7 @@ end
 
     @test y isa CausalVariable
 
-    rand!(y)
+    resolve!(y)
 
     @test getvalue(y) == getvalue(x)^2
 
@@ -52,7 +52,7 @@ end
         end
 
         causal_var = foo()
-        @test 10*rand!(x) ≈ rand!(causal_var)
+        @test 10*resolve!(x) ≈ resolve!(causal_var)
         @test !isdefined(@__MODULE__, :s)
     end 
 
@@ -70,7 +70,7 @@ end
 
         @test e isa CausalVariable
         @test !(d isa CausalVariable)
-        @test rand!(e) isa Float64
+        @test resolve!(e) isa Float64
 
         x = causify(Normal(0,1))
         @causify :constants begin
@@ -81,7 +81,7 @@ end
 
         @test e isa CausalVariable
         @test d isa CausalVariable
-        @test rand!(e) isa Float64
+        @test resolve!(e) isa Float64
     end
 
 
@@ -100,8 +100,8 @@ end
         e = foo()
 
         @test e isa CausalVariable 
-        @test rand!(e) isa Float64
-        @test getvalue(e) ≈ rand!(e)
+        @test resolve!(e) isa Float64
+        @test getvalue(e) ≈ resolve!(e)
     end
 
     @testset "Contains nested scope" begin

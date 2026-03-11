@@ -11,11 +11,10 @@ using Distributions: Distribution
 export CausalVariable,
     ValueUnknownError, getvalue, setvalue!, 
     isknown, isunknown,
-    dependson, 
-    rand!, reset!, resetandrand!, nrand!,
+    isanyknown, isnothingknown, dependson, 
+    ValueAlreadyKnownError,
+    resolve!, refresh!, simulate!, simulate!,
     causify, @causify
-
-
 
 """
     Possible{T}
@@ -32,7 +31,7 @@ end
 
 You tried to get the value of a CausalVariable that has not yet been sampled. 
 """
-abstract type ValueUnknownError <: Exception end 
+struct ValueUnknownError <: Exception end 
 
 """
     CausalVariable{T}
@@ -110,10 +109,9 @@ end
 Returns the value that is wrapped within the causalvariable.
 """
 getvalue(causalvariable::CausalVariable) = @cases causalvariable.value begin 
-    Unknown => error(ValueUnknownError, " Can't get the value of an unknown value! Perhaps call rand!(your_variable) first.")
+    Unknown => error(ValueUnknownError, " Can't get the value of an unknown value! Perhaps call resolve!(your_variable) first. The variable you attempted to get the value of was $causalvariable")
     Known(x) => x
 end
-
 
 """
     setvalue!(causalvariable::CausalVariable{T}, value::T)
@@ -153,7 +151,36 @@ function setunknown!(causalvariable)
 end
 
 """
-    rand!(causalvariables...)
+    dependson(parent, child)
+
+Checks where the parent depends on the child, recursively. If it doesn't depend, then obviously changing the `child` is not going to change `parent`. 
+"""
+dependson(parent::CausalVariable, child::CausalVariable) = isparent(parent, child)
+
+"""
+    isanyknown(causalvar::CausalVariable...)
+
+Checks whether `causalvar` is known, or any of its dependencies are known. 
+"""
+isanyknown(causalvar::CausalVariable) = any(isknown, postorder(causalvar))
+isanyknown(causalvar::CausalVariable...) = any(isanyknown, causalvar)
+
+"""
+    isnothingknown(causalvar::CausalVariable...)
+
+Checks whether `causalvar` is unknown, and all of its dependencies are unknown. 
+"""
+isnothingknown(causalvar::CausalVariable...) = !isanyknown(causalvar...)
+
+"""
+    ValueAlreadyKnownError
+
+You cannot simulate a CausalVariable if some parts of it are already known. 
+"""
+struct ValueAlreadyKnownError <: Exception end 
+
+"""
+    resolve!(causalvariables...)
 
 Samples each of the `causalvariables` supplied and returns the value of those answers. 
 If the variable value is already known, it returns that known value.
@@ -162,15 +189,15 @@ Example:
 
 ```julia
 x = causify(Uniform(0,1))
-first_sample = rand!(x)
-second_sample = rand!(x)
+first_sample = resolve!(x)
+second_sample = resolve!(x)
 
-@assert first_sample == second_sample # note that rand! is not a completely fresh sample. It keeps known values around until you set the CausalVariable to `Unknown`. 
+@assert first_sample == second_sample # note that resolve! is not a completely fresh sample. It keeps known values around until you set the CausalVariable to `Unknown`. 
 ```
 
-`rand!` recursively modifies all CausalVariables beneath it, by design, because it samples them all. 
+`resolve!` recursively modifies all CausalVariables beneath it, by design, because it samples them all. 
 """
-function rand!(causalvariable::CausalVariable)
+function resolve!(causalvariable::CausalVariable)
     if isknown(causalvariable) return getvalue(causalvariable) end
     for child in postorder(causalvariable; connector = (parent, child) -> isunknown(child))
         values = getvalue.(child.dependson)
@@ -178,9 +205,10 @@ function rand!(causalvariable::CausalVariable)
     end 
     return getvalue(causalvariable)
 end
+resolve!(causalvariable::CausalVariable...) = resolve!.(causalvariable)
 
 """
-    reset!(rv::CausalVariable...)
+    refresh!(rv::CausalVariable...)
 
 In short, this makes the `CausalVariable` forget its current sample so you can resample the CausalVariable. 
 Makes each of the `causalvariables` supplied `Unknown` and **recursively** does this for all children. 
@@ -192,93 +220,111 @@ Example:
 x = causify(Uniform(0,1))
 y = @causify x^2
 
-first_sample = rand!(y)
+first_sample = resolve!(y)
 
 @assert isknown(x) # This value is sampled through y
 @assert isknown(y) # This value is sampled directly 
 
-reset!(y)
+refresh!(y)
 
-@assert isunknown(x) # This value was reset through y
-@assert isunknown(y) # This value was reset directly 
+@assert isunknown(x) # This value was refreshed through y
+@assert isunknown(y) # This value was refreshed directly 
 ```
 """
-function reset!(rv::CausalVariable)
-    for child in postorder(rv)
+function refresh!(causal_variable::CausalVariable)
+    for child in postorder(causal_variable)
         setunknown!(child)
     end 
-    return rv
+    return causal_variable
 end
+refresh!(causalvariable::CausalVariable...) = refresh!.(causalvariable)
 
 """
-    resetandrand!([intervention_function::Function, ]rv::CausalVariable...)
+    simulate!([intervention_function::Function, n::Int, ]causalvar::CausalVariable...)
 
-Get an absolutely fresh sample of your variables. 
+Get an absolutely fresh sample of your variables. This will refresh! this and all sub-variables.
+You can call this is repeatedly by supplying `n`. Handy for data. 
 
-Examples:
+Warning! This leaves your variables in a known state. 
+
+Examples for a single variable and simulation:
 
 ```julia
 x = causify(Uniform(0,1))
 y = @causify x^2
-fresh_sample1 = resetandrand!(y)
-fresh_sample2 = resetandrand!(y)
+fresh_sample1 = simulate!(y)
+fresh_sample2 = simulate!(y)
 
 @assert fresh_sample1 != fresh_sample2 # these are 100% fresh samples
 
-rigged_value = resetandrand!(y) do
+rigged_value = simulate!(y) do
     setvalue!(x, 0.5)
 end 
 
 @assert rigged_value == 0.25 
 ```
-"""
-function resetandrand!(intervention_function!::Function, causalvariable::CausalVariable...)
-    reset!(causalvariable...)
-    intervention_function!()
-    return rand!(causalvariable...)
-end
-resetandrand!(causalvariable::CausalVariable...) = resetandrand!(() -> (), causalvariable...)
 
-for func in (:rand!, :reset!)
-    @eval $func(rv...) = ($func).([rv...])
-end
-
-"""
-    nrand!([intervention_function!::Function, ]rv::CausalVariable...; n = 5)
-
-Get `n` absolutely fresh samples of your variables. Super handy if you want to sample lots of stuff. 
-
-Examples:
+Examples for multiplie simulations:
 
 ```julia
 x = causify(Uniform(0,1))
 y = @causify x^2 # define y as x^2
 
-mat = nrand!(x, y) # first column = 5 fresh samples of x, second column = 5 fresh samples of y; those samples are consistent in each row
+mat = simulate!(5, x, y) # first column = 5 fresh samples of x, second column = 5 fresh samples of y; those samples are consistent in each row
 
 @assert all(mat[:,1] .^ 2 .== mat[:,2]) # every value in column 1 squared equals every value in column 2
 
-rigged_matrix = nrand!(x, y) do
+rigged_tuple = simulate!(5, x, y) do
     setvalue!(x, 0.5)
 end 
 
-@assert all(rigged_matrix[:,1] .== 0.5)
-@assert all(rigged_matrix[:,2] .== 0.25)
+@assert all(rigged_tuple[1] .== 0.5)
+@assert all(rigged_tuple[2] .== 0.25)
 
 # and then if you want...
 using DataFrames
-df = DataFrame(rigged_matrix, [:x, :y])
+df = DataFrame(collect(rigged_tuple), [:x, :y])
 ```
 """
-nrand!(intervention_function!::Function, causalvariable::CausalVariable...; n = 5) = reduce(vcat, (permutedims(resetandrand!(intervention_function!, collect(causalvariable)...)) for _ in 1:n))
-nrand!(causalvariable::CausalVariable...; n = 5) = reduce(vcat, (permutedims(resetandrand!(collect(causalvariable)...)) for _ in 1:n))
+function simulate!(intervention_function!::Function, causalvariable::CausalVariable...)
+    refresh!(causalvariable...)
+    intervention_function!()
+    return resolve!(causalvariable...)
+end
+simulate!(causalvariable::CausalVariable...) = simulate!(() -> (), causalvariable...)
+
+simulate!(intervention_function!::Function, n::Int, causalvariable::CausalVariable...) = 
+    zip((simulate!(intervention_function!, causalvariable...) for _ in 1:n)...) .|> collect |> Tuple
+simulate!(n::Int, causalvariable::CausalVariable...) = simulate!(() -> (), n, causalvariable...)
 
 """
-    dependson(parent, child)
+    simulate([intervention_function::Function, n::Int, ]causalvar::CausalVariable...)
 
-Checks where the parent depends on the child, recursively. If it doesn't depend, then obviously changing the `child` is not going to change `parent`. 
+Same as `simulate!` but will first check if your variables are known. If already known, it will error. 
+This starts and leaves your variables in an unknown state. 
+
+If you encounter errors, try calling `refresh!` before running this. 
 """
-dependson(parent::CausalVariable, child::CausalVariable) = isparent(parent, child)
+function simulate(intervention_function!::Function, causalvariable::CausalVariable...)
+    if isanyknown(causalvariable...) 
+        error(ValueAlreadyKnownError, "You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvariable")
+    end 
+    intervention_function!()
+    values = resolve!(causalvariable...)
+    refresh!(causalvariable...)
+    return values
+end
+simulate(causalvariable::CausalVariable...) = simulate(() -> (), causalvariable...)
+
+function simulate(intervention_function!::Function, n::Int, causalvariable::CausalVariable...)
+    if isanyknown(causalvariable...) 
+        error(ValueAlreadyKnownError, "You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvariable")
+    end 
+    values = zip((simulate!(intervention_function!, causalvariable...) for _ in 1:n)...) .|> collect |> Tuple
+    refresh!(causalvariable...)
+    return values 
+end
+simulate(n::Int, causalvariable::CausalVariable...) = simulate(() -> (), n, causalvariable...)
 
 # Include the evil macro 
 include(joinpath(@__DIR__, "CausifyMacro.jl"))

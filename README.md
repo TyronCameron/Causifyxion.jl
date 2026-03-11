@@ -5,7 +5,7 @@
 [![Coverage](https://codecov.io/gh/TyronCameron/Causifyxion.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/TyronCameron/Causifyxion.jl)
 [![Docs workflow Status](https://github.com/TyronCameron/Causifyxion.jl/actions/workflows/doc.yml/badge.svg)](https://github.com/TyronCameron/Causifyxion.jl/actions/workflows/doc.yml)
 
-Create and manage causally-related variables. 
+Causifyxion is a library to help create and manage causally-related variables. 
 
 That includes:
 
@@ -22,6 +22,8 @@ y = causify(x) do x # now create Causal Variable called `y`, capturing `x` as a 
 end 
 ```
 
+This creates a Directed Acyclic Graph (DAG) for these variables. We can simulate either of these variables. 
+
 Now we can easily calculate `y` given `x`. All we need to do is:
 
 ```julia
@@ -33,7 +35,5 @@ It is crucial that this package mutates the state of Causal Variables, and varia
 
 ## Todo
 
-- change `rand!` to `simulate!` (or similar). This wording aligns better with reactivity, caching, etc
-- make `simulate!` = `rand_and_reset!` so that global state is always (kind of) set to `unknown!`. 
 - create a function to uproot all values and set unknown above it, invalidating all downstream variables. 
 

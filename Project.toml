@@ -7,3 +7,9 @@ authors = ["TyronCameron <tyron.luke.cameron@gmail.com>"]
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 SumTypes = "8e1ec7a9-0e02-4297-b0fe-6433085c89f2"
 Taproots = "6cca9763-2e92-47b9-bf40-ccfe60418944"
+
+[compat]
+julia = "1.10"
+Distributions = "^0.25.123"
+SumTypes = "^0.5.8"
+Taproots = "^0.3.0"
