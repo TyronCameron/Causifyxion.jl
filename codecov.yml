@@ -1,0 +1,9 @@
+coverage:
+  status:
+    project:
+      default:
+        target: 70%
+    patch:
+      default:
+        target: 70%
+  range: "55...70" # Yellow within this range
