@@ -7,6 +7,7 @@ on:
     branches:
       - main
     tags: '*'
+  workflow_dispatch: {}
 
 permissions:
   actions: write
@@ -16,8 +17,9 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        julia-version: ['lts']
+        julia-version: ['lts', 'release']
         julia-arch: [x64, x86]
         os: [ubuntu-latest, windows-latest, macOS-latest]
         exclude:
@@ -33,5 +35,9 @@ jobs:
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
-        # with:
-        #   annotate: true
+      - uses: julia-actions/julia-processcoverage@v1
+        if: matrix.julia-version == 'release' && matrix.os == 'ubuntu-latest' && matrix.julia-arch == 'x64'
+      - uses: codecov/codecov-action@v5
+        if: matrix.julia-version == 'release' && matrix.os == 'ubuntu-latest' && matrix.julia-arch == 'x64'
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}

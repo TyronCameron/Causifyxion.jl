@@ -1,5 +1,12 @@
 # Causifyxion.jl 
 
+[![Development documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://TyronCameron.github.io/NewPackage.jl/dev)
+[![Test workflow status](https://github.com/TyronCameron/NewPackage.jl/actions/workflows/Test.yml/badge.svg?branch=main)](https://github.com/TyronCameron/NewPackage.jl/actions/workflows/Test.yml?query=branch%3Amain)
+[![Coverage](https://codecov.io/gh/TyronCameron/NewPackage.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/TyronCameron/NewPackage.jl)
+[![Docs workflow Status](https://github.com/TyronCameron/NewPackage.jl/actions/workflows/Docs.yml/badge.svg?branch=main)](https://github.com/TyronCameron/NewPackage.jl/actions/workflows/Docs.yml?query=branch%3Amain)
+
+
+
 Create causal, sampleable random variables. 
 
 Features:
