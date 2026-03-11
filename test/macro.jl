@@ -53,6 +53,7 @@ end
 
         causal_var = foo()
         @test 10*rand!(x) ≈ rand!(causal_var)
+        @test !isdefined(@__MODULE__, :s)
     end 
 
 end
@@ -116,6 +117,5 @@ end
 
         @test e isa CausalVariable
         @test !isdefined(@__MODULE__, :f)
-        @assert false "This last test above looks broken but valuable... might be worth checking it out"
     end
 end

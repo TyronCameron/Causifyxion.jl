@@ -2,6 +2,7 @@
 # Helpers to create a CausalVariable from every symbol 
 
 _get_and_incr(itr, state) = (itr[state], state + 1)
+
 function merge_tuples(dependson, args)
     args_state = 1
     map(dependson) do d
@@ -10,6 +11,7 @@ function merge_tuples(dependson, args)
         r
     end 
 end 
+
 function _causify_all(rand::Function, dependson...; settings = Set{Symbol}()) 
     causals = filter(x -> x isa CausalVariable, dependson)
     if :constants ∉ settings && isempty(causals) return rand(dependson...) end 
@@ -17,6 +19,10 @@ function _causify_all(rand::Function, dependson...; settings = Set{Symbol}())
         (args...) -> rand(merge_tuples(dependson, args)...),
         causals...
     )
+end 
+
+function _assigned_variable_symbols(expr)
+    assigned_expressions = filter(e -> e.head == :(=), collect(preorder(expr)))
 end 
 
 """
@@ -105,51 +111,48 @@ end
 """
 macro causify(args...)
     settings, expr = _settings_and_expr(args...)
-    return _causify(expr, settings)
+    new_expr = _causify(expr, settings)
+    return esc(new_expr) 
 end 
 
 # Helper
 function _causify(expr, settings)
-    if expr isa Expr && expr.head == :block 
-        new_expr = causify_block(expr, settings) |> esc
-    elseif expr isa Expr && expr.head == :(=) 
-        new_expr = causify_assignment(expr, settings) |> esc
-    elseif expr isa Expr 
-        new_expr = causify_expr(expr, settings) |> esc
-    else 
-        new_expr = expr 
-    end 
-    return new_expr
+    expr isa Expr && expr.head == :block &&
+        return _causify_block(expr, settings)
+    expr isa Expr && expr.head == :(=) &&
+        return _causify_assignment(expr, settings)
+    return _causify_expr(expr, settings)
 end
 
 # Rule 1: Causify expressions 
-function causify_expr(expr, settings)
-    sym_tuple = Expr(:tuple, filter(e -> e isa Symbol, collect(leaves(expr)))...)
+function _causify_expr(expr, settings)
+    if !(expr isa Expr) && :constants ∉ settings return expr end 
+    sym_tuple = Expr(:tuple, filter(e -> e isa Symbol && occursin(r"^[a-zA-Z_]", string(e)), collect(leaves(expr)))...)
     quote 
-        $_causify_all($sym_tuple -> $expr, $sym_tuple...; settings = $settings)
+        Base.invokelatest($_causify_all, $sym_tuple -> $expr, $sym_tuple...; settings = $settings)
     end
 end 
 
 # Rule 2: Allow assignment statements through
-function causify_assignment(expr, settings)
-    args = causify_expr(expr.args[2], settings)
+function _causify_assignment(expr, settings)
+    args = _causify(expr.args[2], settings)
     return :($(expr.args[1]) = $args)
 end
 
 # Rule 3: Allow blocks of code through
-function causify_block(expr, settings)
+function _causify_block(expr, settings)
     new_exprs = []
     for (i,e) in enumerate(expr.args)
-        if !(e isa Expr) 
-            push!(new_exprs, e) 
-            continue
+        is_valid_expression = e isa Expr && 
+            (e.head == :(=) || e.head == :block || i == length(expr.args))
+        if is_valid_expression
+            push!(new_exprs, _causify(e, settings))
+        else
+            push!(new_exprs, e)
         end 
-        if e.head == :(=) || i == length(expr.args)
-            push!(new_exprs, :($_causify(esc($e), $settings)))
-        end 
-    end 
+    end
     return Expr(:block, new_exprs...)
-end 
+end
 
 # Rule 4: Separate out symbols / flags
 function _settings_and_expr(args...)
