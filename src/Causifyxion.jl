@@ -1,32 +1,60 @@
+
 """
-Causifyxion is a library creating and sampling from causally-related random variables.
+Causifyxion is a library for creating causally-related variables, and sampling from them.
 """
-# module Causifyxion
-# using Distributions, Taproots, ForwardDiff, QuadGK
-# using MacroTools: @capture
+module Causifyxion
 
-# include("/home/tyronc/Nextcloud/Projects/packages/Taproots.jl/Taproots.jl/src/Taproots.jl")
-include(joinpath(dirname(dirname(dirname(@__DIR__))), "Taproots.jl/Taproots.jl/src/Taproots.jl"))
-using .Taproots
+using Taproots
+using SumTypes
+using Distributions: Distribution
 
-using SumTypes, Distributions
-
-export getvalue, setvalue!, 
+export CausalVariable,
+    ValueUnknownError, getvalue, setvalue!, 
     isknown, isunknown,
     dependson, 
-    rand!, reset!, randandreset!, nrand!,
+    rand!, reset!, resetandrand!, nrand!,
     causify, @causify
 
+
+
+"""
+    Possible{T}
+
+A sum type including `Unknown` as well as `Known(x::T)`. 
+"""
 @sum_type Possible{T} begin
     Unknown
     Known{T}(::T)
 end 
 
 """
+    ValueUnknownError
+
+You tried to get the value of a CausalVariable that has not yet been sampled. 
+"""
+abstract type ValueUnknownError <: Exception end 
+
+"""
     CausalVariable{T}
 
 A mutable struct, and the main struct that this package provides. 
 A CausalVariable is just a wrapper around a mechanism of sampling that variable. Create one using `causify`.
+
+Example: 
+
+```julia
+x = causify(Normal(0,1))
+```
+
+The point of this struct is to: 
+
+- Keep track of dependencies between variables
+- Keep track of sampled values until they are resampled 
+
+This enables you to: 
+
+- Sample from a few dependent variables conveniently without needing to wrap it in one ugly function / closure 
+- Manually intervene in the system and resample with your interventions
 """
 mutable struct CausalVariable{T}
     value::Possible{T}
@@ -45,65 +73,135 @@ function Base.show(io::IO, rv::CausalVariable)
 end 
 
 """
-    causify(rand::Function, dependencies::CausalVariable...)
+    causify(distr::Distribution)
+    causify(rand::Function, [::Type{T},] dependencies::CausalVariable...)
 
-z = causify(T, x, z) do x, z 
-    x + z 
-end 
+This is the main entrypoint (along with the more convenient @causify) to get a CausalVariable struct. 
+There are a few options to call this function.
+
+```julia 
+using Distributions
+
+x = causify(Normal(0,1)) # first way 
+y = causify(x) do x 
+    x^2
+end # second way, defines y to be x^2
+z = causify(Float64, x, y) do x, y 
+    x + y 
+end # third way, defines z to be x + y, and type hints at z's eltype. 
+```
+
+You may find the type hinting useful in some scenarios. In our case, it is redundant and will automatically be inferred. 
+Also see @causify for a more convenient way to call this function. 
 """
 causify(rand::Function, ::Type{T}, dependson::CausalVariable...) where T = CausalVariable{T}(Unknown, rand, collect(dependson))
 causify(distr::Distribution) = causify(() -> rand(distr), eltype(distr))
-causify(rand::Function, dependson::CausalVariable...) = causify(rand, Union{Base.return_types(rand, eltype.(dependson))...}, dependson...)
+function causify(rand::Function, dependson::CausalVariable...) 
+    types = Union{Base.return_types(rand, eltype.(dependson))...}
+    if types <: Union{} 
+        types = Any 
+    end 
+    causify(rand, types, dependson...)
+end 
 
 """
-    getvalue(causalvariable)
+    getvalue(causalvariable::CausalVariable)
+
+Returns the value that is wrapped within the causalvariable.
 """
-function getvalue(causalvariable::CausalVariable) 
-    @cases causalvariable.value begin 
-        Unknown => error("Can't get the value of an unknown causal variable! Perhaps call rand!(your_variable) first.")
-        Known(x) => x
-    end 
+getvalue(causalvariable::CausalVariable) = @cases causalvariable.value begin 
+    Unknown => error(ValueUnknownError, " Can't get the value of an unknown value! Perhaps call rand!(your_variable) first.")
+    Known(x) => x
+end
+
+
+"""
+    setvalue!(causalvariable::CausalVariable{T}, value::T)
+
+Sets the value that is wrapped within the causalvariable. `value` must be of type `T` where `T` is the eltype of `causalvariable`. 
+"""
+function setvalue!(causalvariable::CausalVariable{T}, value::T) where T
+    causalvariable.value = Known{T}(value)
+    return causalvariable
 end
 
 """
     isknown(causalvariable)
+
+`true` is the causalvariable has a known value (i.e. has been previously sampled). `false` otherwise.
 """ 
-function isknown(causalvariable::CausalVariable)
-    @cases causalvariable.value begin
-        Unknown => false 
-        Known(x) => true
-    end
+isknown(causalvariable::CausalVariable) = @cases causalvariable.value begin
+    Unknown => false 
+    Known(x) => true
 end
 
+"""
+    isknown(causalvariable)
+
+`true` is the causalvariable has a known value (i.e. has been previously sampled). `false` otherwise.
+"""
 isunknown(causalvariable::CausalVariable) = !isknown(causalvariable)
 
 """
-    setvalue!(causalvariable, value)
-"""
-function setvalue!(causalvariable, value)
-    causalvariable.value = Known(value)
-    return causalvariable
-end
+    setunknown!(causalvariable)
 
+Sets the value of the causal variable back to `Unknown`.
+"""
 function setunknown!(causalvariable)
     causalvariable.value = Unknown
     return causalvariable
 end
 
 """
-    rand!(rv...)
+    rand!(causalvariables...)
+
+Samples each of the `causalvariables` supplied and returns the value of those answers. 
+If the variable value is already known, it returns that known value.
+
+Example: 
+
+```julia
+x = causify(Uniform(0,1))
+first_sample = rand!(x)
+second_sample = rand!(x)
+
+@assert first_sample == second_sample # note that rand! is not a completely fresh sample. It keeps known values around until you set the CausalVariable to `Unknown`. 
+```
+
+`rand!` recursively modifies all CausalVariables beneath it, by design, because it samples them all. 
 """
-function rand!(rv::CausalVariable)
-    if isknown(rv) return getvalue(rv) end
-    for child in postorder(rv; connector = isunknown)
+function rand!(causalvariable::CausalVariable)
+    if isknown(causalvariable) return getvalue(causalvariable) end
+    for child in postorder(causalvariable; connector = (parent, child) -> isunknown(child))
         values = getvalue.(child.dependson)
-        setvalue!(child, child.rand(values...))
+        setvalue!(child, Base.invokelatest(child.rand, (values...)))
     end 
-    return getvalue(rv)
+    return getvalue(causalvariable)
 end
 
 """
     reset!(rv::CausalVariable...)
+
+In short, this makes the `CausalVariable` forget its current sample so you can resample the CausalVariable. 
+Makes each of the `causalvariables` supplied `Unknown` and **recursively** does this for all children. 
+To do this non-recursively, rather use `setunknown!`. 
+
+Example: 
+
+```julia
+x = causify(Uniform(0,1))
+y = @causify x^2
+
+first_sample = rand!(y)
+
+@assert isknown(x) # This value is sampled through y
+@assert isknown(y) # This value is sampled directly 
+
+reset!(y)
+
+@assert isunknown(x) # This value was reset through y
+@assert isunknown(y) # This value was reset directly 
+```
 """
 function reset!(rv::CausalVariable)
     for child in postorder(rv)
@@ -113,132 +211,79 @@ function reset!(rv::CausalVariable)
 end
 
 """
-    randandreset!(rv::CausalVariable...)
-"""
-function randandreset!(rv::CausalVariable)
-    val = rand!(rv)
-    reset!(rv)
-    return val
-end
+    resetandrand!([intervention_function::Function, ]rv::CausalVariable...)
 
-for func in (:rand!, :reset!, :randandreset!)
+Get an absolutely fresh sample of your variables. 
+
+Examples:
+
+```julia
+x = causify(Uniform(0,1))
+y = @causify x^2
+fresh_sample1 = resetandrand!(y)
+fresh_sample2 = resetandrand!(y)
+
+@assert fresh_sample1 != fresh_sample2 # these are 100% fresh samples
+
+rigged_value = resetandrand!(y) do
+    setvalue!(x, 0.5)
+end 
+
+@assert rigged_value == 0.25 
+```
+"""
+function resetandrand!(intervention_function!::Function, causalvariable::CausalVariable...)
+    reset!(causalvariable...)
+    intervention_function!()
+    return rand!(causalvariable...)
+end
+resetandrand!(causalvariable::CausalVariable...) = resetandrand!(() -> (), causalvariable...)
+
+for func in (:rand!, :reset!)
     @eval $func(rv...) = ($func).([rv...])
 end
 
 """
-    nrand!(rv::CausalVariable...; n = 20)
-"""
-nrand!(rv::CausalVariable...; n = 20) = reduce(hcat, 1:n .|> x -> randandreset!.(rv))'
+    nrand!([intervention_function!::Function, ]rv::CausalVariable...; n = 5)
 
+Get `n` absolutely fresh samples of your variables. Super handy if you want to sample lots of stuff. 
+
+Examples:
+
+```julia
+x = causify(Uniform(0,1))
+y = @causify x^2 # define y as x^2
+
+mat = nrand!(x, y) # first column = 5 fresh samples of x, second column = 5 fresh samples of y; those samples are consistent in each row
+
+@assert all(mat[:,1] .^ 2 .== mat[:,2]) # every value in column 1 squared equals every value in column 2
+
+rigged_matrix = nrand!(x, y) do
+    setvalue!(x, 0.5)
+end 
+
+@assert all(rigged_matrix[:,1] .== 0.5)
+@assert all(rigged_matrix[:,2] .== 0.25)
+
+# and then if you want...
+using DataFrames
+df = DataFrame(rigged_matrix, [:x, :y])
+```
+"""
+nrand!(intervention_function!::Function, causalvariable::CausalVariable...; n = 5) = reduce(vcat, (permutedims(resetandrand!(intervention_function!, collect(causalvariable)...)) for _ in 1:n))
+nrand!(causalvariable::CausalVariable...; n = 5) = reduce(vcat, (permutedims(resetandrand!(collect(causalvariable)...)) for _ in 1:n))
 
 """
     dependson(parent, child)
 
+Checks where the parent depends on the child, recursively. If it doesn't depend, then obviously changing the `child` is not going to change `parent`. 
 """
 dependson(parent::CausalVariable, child::CausalVariable) = isparent(parent, child)
 
+# Include the evil macro 
+include(joinpath(@__DIR__, "CausifyMacro.jl"))
+
+end  # module Causifyxion
 
 
-# The following rules apply
-    # 1) x = @causify expr 
-        # If expr resolves to a Distribution ... 
-            # return causify(expr)
-        # Else simply walks the expr, and any symbols of type CausalVariable go into the dependson tuple. Once done: 
-        # quote 
-            # causify($dependson...) do $dependson... 
-                # $expr
-            # end
-        # end
-    # 2) @causify x = expr 
-        # Same thing as x = @causify expr 
-    # 3) Can include begin ... end statements, such as 
-        # @causify begin 
-            # x = 1
-            # y = 3 
-            # z = begin 
-                # ... 
-            # end 
-        # end 
-        # If no assignment on the final return, that should also be wrapped in a CausalVariable
-        # That basically puts a @causify before every assignment statement
-    # 4) If settings are provided, use them first, regardless of the above rules 
-            # @causify :noconstants begin 
-                # ... 
-            # end 
 
-
-# function safe_rv_check(x)
-#     try
-#         eval(x) isa CausalVariable
-#     catch
-#         false
-#     end
-# end
-
-# macro causify(expr)
-
-#     _expr     = gensym(:expr)
-#     _fexpr    = gensym(:fexpr)
-#     _rvs      = gensym(:rvs)
-#     _f        = gensym(:f)
-
-#     return quote
-#         local $(_expr)  = $(Meta.quot(expr))
-#         local $(_fexpr) = leafmap(x -> safe_rv_check(x) ? :(rand!($x)) : x, $(_expr))
-#         local $(_rvs)   = Iterators.filter(x -> safe_rv_check(x), leaves($(_expr)))
-#         local $(_f)     = () -> eval($(_fexpr))
-#         CausalVariable($(_f)(), true, $(_f), eval.($(_rvs)))
-#     end |> esc
-
-# end
-
-
-x = causify(Normal(0, 1))
-eltype(x)
-y = causify(x) do x
-    x^2
-end 
-
-y
-x
-rand!(y)
-
-filter(x -> :($(esc(x) isa CausalVariable)), leaves(:(x + y)) |> collect)
-map(x -> :($(x)), leaves(:(x + y)) |> collect)
-
-function _unwrap_causal_variable(expr)
-    if expr isa Symbol
-        return :(_getvalue($(esc(expr))))
-    elseif expr isa Expr && expr.head == :call
-        return Expr(:call, expr.args[1], map(_unwrap_causal_variable, expr.args[2:end])...)
-    else
-        return expr
-    end
-end
-
-# macro setknown!(exs...)
-#     return quote (x -> begin
-#         for ex in $exs
-#             @capture(ex, ls__)
-#             for l in ls
-#                 @capture(l, before_ = after_) &&
-#                 setknown!(eval(before), eval(after))
-#             end
-#         end
-#     end)(nothing) end |> esc
-# end
-
-# using Plots, CausalVariables
-# theme(:juno, grid = false)
-# x = @rv rand(Normal(1,1))
-# y = @rv rand(Normal(1,1))
-# z = @rv x*y
-# a = @rv z^2 + x
-
-# plottree(
-#     a,
-#     title = "Plot of random variable a",
-#     names = ["A" "Z" "X" "X" "Y"]
-# )
-
-# end  # module Causifyxion
