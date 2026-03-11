@@ -25,7 +25,7 @@
         z = causify(Float64, causify(Normal(0,1))) do x, y 
             x + y 
         end 
-        rand!(z)
+        resolve!(z)
     end
 
 end 
@@ -36,7 +36,7 @@ end
         x^2
     end 
     
-    @test_throws "Perhaps call rand!" begin 
+    @test_throws "Perhaps call resolve!" begin 
         getvalue(x)
     end 
 
@@ -50,8 +50,8 @@ end
     @test isknown(x)
     @test isunknown(y)
 
-    rand!(y)
-    reset!(x)
+    resolve!(y)
+    refresh!(x)
 
     @test isknown(y)
     @test isunknown(x)
@@ -66,34 +66,40 @@ end
     y = causify(x) do x 
         x^2
     end 
-    fresh_sample1 = resetandrand!(y)
-    fresh_sample2 = resetandrand!(y)
+    fresh_sample1 = simulate!(y)
+    fresh_sample2 = simulate!(y)
 
     @test fresh_sample1 != fresh_sample2 # these are 100% fresh samples
 
-    rigged_value = resetandrand!(y) do
+    rigged_value = simulate!(y) do
         setvalue!(x, 0.5)
     end 
 
     @test rigged_value == 0.25 
 end
 
-@testset "nrand!" begin
+@testset "simulate! n" begin
     x = causify(Uniform(0,1))
     y = causify(x) do x 
         x^2
     end 
 
-    mat = nrand!(x, y) # first column = 5 fresh samples of x, second column = 5 fresh samples of y; those samples are consistent in each row
+    tup = simulate!(5, x, y) # first column = 5 fresh samples of x, second column = 5 fresh samples of y; those samples are consistent in each row
+    
+    @test tup isa Tuple
 
-    @test mat isa Matrix
-    @test all(mat[:,1] .^ 2 .== mat[:,2]) # every value in column 1 squared equals every value in column 2
+    xvals, yvals = tup
+    @test all(xvals .^ 2 .≈ yvals) # every value in column 1 squared equals every value in column 2
 
-    rigged_matrix = nrand!(x, y) do
+    rigged_tuple = simulate!(5, x, y) do
         setvalue!(x, 0.5)
     end 
 
-    @test all(rigged_matrix[:,1] .== 0.5)
-    @test all(rigged_matrix[:,2] .== 0.25)
+    @test all(rigged_tuple[1] .== 0.5)
+    @test all(rigged_tuple[2] .== 0.25)
 
+    df = DataFrame(collect(rigged_tuple), [:x, :y])
+
+    @test df isa DataFrame
+    @test df.x[1] == 0.5
 end
