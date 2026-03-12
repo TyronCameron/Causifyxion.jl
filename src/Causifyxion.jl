@@ -57,23 +57,24 @@ This enables you to:
 """
 mutable struct CausalVariable{T}
     value::Possible{T}
-    rand::Function
-    dependson::Vector{<:CausalVariable}
+    resolver::Function
+    dependencies::Vector{<:CausalVariable}
 end
-Taproots.children(rv::CausalVariable) = rv.dependson
+Taproots.children(causalvar::CausalVariable) = causalvar.dependencies
+Taproots.setchildren!(causalvar::CausalVariable, children) = (causalvar.dependencies = children; causalvar)
 Base.eltype(::CausalVariable{T}) where T = T
-function Base.show(io::IO, rv::CausalVariable) 
-    t = eltype(rv)
-    v = @cases rv.value begin
-        Unknown => "CausalVariable(Unknown::$(t))"
-        Known(x) => "CausalVariable($(x)::$(t))"
+function Base.show(io::IO, causalvar::CausalVariable) 
+    type = eltype(causalvar)
+    value = @cases causalvar.value begin
+        Unknown => "CausalVariable(Unknown::$(type))"
+        Known(x) => "CausalVariable($(x)::$(type))"
     end
-    show(io, v)
+    show(io, value)
 end 
 
 """
     causify(distr::Distribution)
-    causify(rand::Function, [::Type{T},] dependencies::CausalVariable...)
+    causify(resolver::Function, [::Type{T},] dependencies::CausalVariable...)
 
 This is the main entrypoint (along with the more convenient @causify) to get a CausalVariable struct. 
 There are a few options to call this function.
@@ -91,63 +92,61 @@ end # third way, defines z to be x + y, and type hints at z's eltype.
 ```
 
 You may find the type hinting useful in some scenarios. In our case, it is redundant and will automatically be inferred. 
-Also see @causify for a more convenient way to call this function. 
+Also see `@causify` for another convenient way to call this function. 
 """
-causify(rand::Function, ::Type{T}, dependson::CausalVariable...) where T = CausalVariable{T}(Unknown, rand, collect(dependson))
+causify(resolver::Function, ::Type{T}, dependencies::CausalVariable...) where T = CausalVariable{T}(Unknown, resolver, collect(dependencies))
 causify(distr::Distribution) = causify(() -> rand(distr), eltype(distr))
-function causify(rand::Function, dependson::CausalVariable...) 
-    types = Union{Base.return_types(rand, eltype.(dependson))...}
-    if types <: Union{} 
-        types = Any 
-    end 
-    causify(rand, types, dependson...)
+function causify(resolver::Function, dependencies::CausalVariable...) 
+    types = Union{Base.return_types(resolver, eltype.(dependencies))...}
+    if types <: Union{} types = Any end 
+    causify(resolver, types, dependencies...)
 end 
 
 """
-    getvalue(causalvariable::CausalVariable)
+    getvalue(causalvar::CausalVariable)
 
-Returns the value that is wrapped within the causalvariable.
+Returns the value that is wrapped within the causalvar.
 """
-getvalue(causalvariable::CausalVariable) = @cases causalvariable.value begin 
-    Unknown => error(ValueUnknownError, " Can't get the value of an unknown value! Perhaps call resolve!(your_variable) first. The variable you attempted to get the value of was $causalvariable")
+getvalue(causalvar::CausalVariable) = @cases causalvar.value begin 
+    Unknown => error(ValueUnknownError, " Can't get the value of an unknown value! Perhaps call resolve!(your_variable) first. The variable you attempted to get the value of was $causalvar")
     Known(x) => x
 end
 
 """
-    setvalue!(causalvariable::CausalVariable{T}, value::T)
+    setvalue!(causalvar::CausalVariable{T}, value::T)
 
-Sets the value that is wrapped within the causalvariable. `value` must be of type `T` where `T` is the eltype of `causalvariable`. 
+Sets the value that is wrapped within the causalvar. `value` must be of type `T` where `T` is the eltype of `causalvar`. 
 """
-function setvalue!(causalvariable::CausalVariable{T}, value::T) where T
-    causalvariable.value = Known{T}(value)
-    return causalvariable
+function setvalue!(causalvar::CausalVariable{T}, value::T) where T
+    causalvar.value = Known{T}(value)
+    return causalvar
 end
 
 """
-    isknown(causalvariable)
+    isknown(causalvar)
 
-`true` is the causalvariable has a known value (i.e. has been previously sampled). `false` otherwise.
+`true` is the causalvar has a known value (i.e. has been previously sampled). `false` otherwise.
 """ 
-isknown(causalvariable::CausalVariable) = @cases causalvariable.value begin
+isknown(causalvar::CausalVariable) = @cases causalvar.value begin
     Unknown => false 
     Known(x) => true
 end
 
 """
-    isknown(causalvariable)
+    isknown(causalvar)
 
-`true` is the causalvariable has a known value (i.e. has been previously sampled). `false` otherwise.
+`true` is the causalvar has a known value (i.e. has been previously sampled). `false` otherwise.
 """
-isunknown(causalvariable::CausalVariable) = !isknown(causalvariable)
+isunknown(causalvar::CausalVariable) = !isknown(causalvar)
 
 """
-    setunknown!(causalvariable)
+    setunknown!(causalvar)
 
 Sets the value of the causal variable back to `Unknown`.
 """
-function setunknown!(causalvariable)
-    causalvariable.value = Unknown
-    return causalvariable
+function setunknown!(causalvar)
+    causalvar.value = Unknown
+    return causalvar
 end
 
 """
@@ -197,21 +196,21 @@ second_sample = resolve!(x)
 
 `resolve!` recursively modifies all CausalVariables beneath it, by design, because it samples them all. 
 """
-function resolve!(causalvariable::CausalVariable)
-    if isknown(causalvariable) return getvalue(causalvariable) end
-    for child in postorder(causalvariable; connector = (parent, child) -> isunknown(child))
-        values = getvalue.(child.dependson)
-        setvalue!(child, Base.invokelatest(child.rand, (values...)))
+function resolve!(causalvar::CausalVariable)
+    if isknown(causalvar) return getvalue(causalvar) end
+    for child in postorder(causalvar; connector = (parent, child) -> isunknown(child))
+        values = getvalue.(child.dependencies)
+        setvalue!(child, Base.invokelatest(child.resolver, (values...)))
     end 
-    return getvalue(causalvariable)
+    return getvalue(causalvar)
 end
-resolve!(causalvariable::CausalVariable...) = resolve!.(causalvariable)
+resolve!(causalvar::CausalVariable...) = resolve!.(causalvar)
 
 """
-    refresh!(rv::CausalVariable...)
+    refresh!(causalvar::CausalVariable...)
 
-In short, this makes the `CausalVariable` forget its current sample so you can resample the CausalVariable. 
-Makes each of the `causalvariables` supplied `Unknown` and **recursively** does this for all children. 
+This makes the `CausalVariable` forget its current sample so you can resample the CausalVariable. 
+Makes each of the `causalvar`s supplied `Unknown` and **recursively** does this for all children. 
 To do this non-recursively, rather use `setunknown!`. 
 
 Example: 
@@ -237,7 +236,7 @@ function refresh!(causal_variable::CausalVariable)
     end 
     return causal_variable
 end
-refresh!(causalvariable::CausalVariable...) = refresh!.(causalvariable)
+refresh!(causalvar::CausalVariable...) = refresh!.(causalvar)
 
 """
     simulate!([intervention_function::Function, n::Int, ]causalvar::CausalVariable...)
@@ -286,16 +285,18 @@ using DataFrames
 df = DataFrame(collect(rigged_tuple), [:x, :y])
 ```
 """
-function simulate!(intervention_function!::Function, causalvariable::CausalVariable...)
-    refresh!(causalvariable...)
+function simulate!(intervention_function!::Function, causalvar::CausalVariable...)
+    refresh!(causalvar...)
     intervention_function!()
-    return resolve!(causalvariable...)
+    return resolve!(causalvar...)
 end
-simulate!(causalvariable::CausalVariable...) = simulate!(() -> (), causalvariable...)
+simulate!(causalvar::CausalVariable...) = simulate!(() -> (), causalvar...)
 
-simulate!(intervention_function!::Function, n::Int, causalvariable::CausalVariable...) = 
-    zip((simulate!(intervention_function!, causalvariable...) for _ in 1:n)...) .|> collect |> Tuple
-simulate!(n::Int, causalvariable::CausalVariable...) = simulate!(() -> (), n, causalvariable...)
+function simulate!(intervention_function!::Function, n::Int, causalvar::CausalVariable...) 
+    values = zip((simulate!(intervention_function!, causalvar...) for _ in 1:n)...) .|> collect 
+    return length(causalvar) == 1 ? values : Tuple(values)
+end 
+simulate!(n::Int, causalvar::CausalVariable...) = simulate!(() -> (), n, causalvar...)
 
 """
     simulate([intervention_function::Function, n::Int, ]causalvar::CausalVariable...)
@@ -305,26 +306,41 @@ This starts and leaves your variables in an unknown state.
 
 If you encounter errors, try calling `refresh!` before running this. 
 """
-function simulate(intervention_function!::Function, causalvariable::CausalVariable...)
-    if isanyknown(causalvariable...) 
-        error(ValueAlreadyKnownError, "You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvariable")
+function simulate(intervention_function!::Function, causalvar::CausalVariable...)
+    if isanyknown(causalvar...) 
+        error(ValueAlreadyKnownError, "You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvar")
     end 
     intervention_function!()
-    values = resolve!(causalvariable...)
-    refresh!(causalvariable...)
+    values = resolve!(causalvar...)
+    refresh!(causalvar...)
     return values
 end
-simulate(causalvariable::CausalVariable...) = simulate(() -> (), causalvariable...)
+simulate(causalvar::CausalVariable...) = simulate(() -> (), causalvar...)
 
-function simulate(intervention_function!::Function, n::Int, causalvariable::CausalVariable...)
-    if isanyknown(causalvariable...) 
-        error(ValueAlreadyKnownError, "You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvariable")
+function simulate(intervention_function!::Function, n::Int, causalvar::CausalVariable...)
+    if isanyknown(causalvar...) 
+        error(ValueAlreadyKnownError, "You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvar")
     end 
-    values = zip((simulate!(intervention_function!, causalvariable...) for _ in 1:n)...) .|> collect |> Tuple
-    refresh!(causalvariable...)
-    return values 
+    values = zip((simulate!(intervention_function!, causalvar...) for _ in 1:n)...) .|> collect 
+    refresh!(causalvar...)
+    return length(causalvar) == 1 ? values : Tuple(values)
 end
-simulate(n::Int, causalvariable::CausalVariable...) = simulate(() -> (), n, causalvariable...)
+simulate(n::Int, causalvar::CausalVariable...) = simulate(() -> (), n, causalvar...)
+
+"""
+    invalidate!(parent::CausalVariable, child::CausalVariable)
+
+Sets the parent, and the child, and all variables on all pathways between them, to be `Unknown`.
+This effectively invalidates the values in upstream variables which are dependent on the `child`, but limited to the scope of the dependencies of the `parent`. 
+"""
+function invalidate!(parent::CausalVariable, child::CausalVariable)
+    for trace in findtraces(child, parent)
+        for t in (trace[1:n] for n in 1:length(trace))
+            setunknown!(pluck(parent, t))
+        end 
+    end 
+    return parent
+end
 
 # Include the evil macro 
 include(joinpath(@__DIR__, "CausifyMacro.jl"))
