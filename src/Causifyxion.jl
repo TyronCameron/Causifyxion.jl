@@ -96,11 +96,10 @@ Also see `@causify` for another convenient way to call this function.
 """
 causify(resolver::Function, ::Type{T}, dependencies::CausalVariable...) where T = CausalVariable{T}(Unknown, resolver, collect(dependencies))
 causify(distr::Distribution) = causify(() -> rand(distr), eltype(distr))
-function causify(resolver::Function, dependencies::CausalVariable...) 
-    types = Union{Base.return_types(resolver, eltype.(dependencies))...}
-    if types <: Union{} types = Any end 
-    causify(resolver, types, dependencies...)
-end 
+function causify(resolver::F, dependencies::CausalVariable...) where {F<:Function}
+    T = Base.promote_op(resolver, eltype.(dependencies)...)
+    causify(resolver, T === Union{} ? Any : T, dependencies...)
+end
 
 """
     getvalue(causalvar::CausalVariable)
@@ -200,7 +199,7 @@ function resolve!(causalvar::CausalVariable)
     if isknown(causalvar) return getvalue(causalvar) end
     for child in postorder(causalvar; connector = (parent, child) -> isunknown(child))
         values = getvalue.(child.dependencies)
-        setvalue!(child, Base.invokelatest(child.resolver, (values...)))
+        setvalue!(child, child.resolver(values...))
     end 
     return getvalue(causalvar)
 end
@@ -342,7 +341,7 @@ function invalidate!(parent::CausalVariable, child::CausalVariable)
     return parent
 end
 
-# Include the evil macro 
+# Include the @causify macro
 include(joinpath(@__DIR__, "CausifyMacro.jl"))
 
 end  # module Causifyxion
