@@ -1,3 +1,8 @@
+
+<p align="center">
+  <img src="docs/src/assets/causifyxion.png" width="150" />
+</p>
+
 # Causifyxion.jl 
 
 [![Development documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://TyronCameron.github.io/Causifyxion.jl/dev)
