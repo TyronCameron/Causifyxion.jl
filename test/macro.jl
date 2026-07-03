@@ -119,3 +119,12 @@ end
         @test !isdefined(@__MODULE__, :f)
     end
 end
+
+@testset "Type inference" begin
+    x = causify(Normal(0,1))
+    g(x) = @causify x + 1.0
+    @test @inferred(g(x)) isa CausalVariable{Float64}
+    @test eltype(g(x)) === Float64
+    h(a, b) = @causify a + b # no-causals path collapses to plain evaluation
+    @test @inferred(h(1.0, 2)) === 3.0
+end

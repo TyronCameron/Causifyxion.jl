@@ -1,36 +1,33 @@
 
-# Helpers to create a CausalVariable from every symbol 
+# Helpers to create a CausalVariable from every symbol.
+# These are written as dispatch-based tuple recursions so the whole pipeline is type-inferrable.
 
-_get_and_incr(itr, state) = (itr[state], state + 1)
+# Select the CausalVariables out of a tuple
+@inline _causals(t::Tuple{}) = ()
+@inline _causals(t::Tuple) = _causals_first(first(t), Base.tail(t))
+@inline _causals_first(x::CausalVariable, rest) = (x, _causals(rest)...)
+@inline _causals_first(::Any, rest) = _causals(rest)
 
-function merge_tuples(dependson, args)
-    args_state = 1
-    map(dependson) do d
-        if !(d isa CausalVariable) return d end 
-        r, args_state = _get_and_incr(args, args_state)
-        r
-    end 
-end 
+# Rebuild `deps`, replacing each CausalVariable with the next resolved value from `args`
+@inline _merge_args(::Tuple{}, ::Tuple{}) = ()
+@inline _merge_args(deps::Tuple, args::Tuple) = _merge_first(first(deps), Base.tail(deps), args)
+@inline _merge_first(::CausalVariable, rest, args) = (first(args), _merge_args(rest, Base.tail(args))...)
+@inline _merge_first(d, rest, args) = (d, _merge_args(rest, args)...)
 
-function _causify_all(rand::Function, dependson...; settings = Set{Symbol}()) 
-    causals = filter(x -> x isa CausalVariable, dependson)
-    if :constants ∉ settings && isempty(causals) return rand(dependson...) end 
-    return causify(
-        (args...) -> rand(merge_tuples(dependson, args)...),
-        causals...
-    )
-end 
+_causify_impl(f::F, deps::Tuple, ::Tuple{}) where {F<:Function} = f(deps...)
+_causify_impl(f::F, deps::Tuple, causals::Tuple) where {F<:Function} =
+    causify((args...) -> f(_merge_args(deps, args)...), causals...)
 
-function _assigned_variable_symbols(expr)
-    assigned_expressions = filter(e -> e.head == :(=), collect(preorder(expr)))
-end 
+_causify_all(f::F, deps...) where {F<:Function} = _causify_impl(f, deps, _causals(deps))
+_causify_all_constants(f::F, deps...) where {F<:Function} =
+    causify((args...) -> f(_merge_args(deps, args)...), _causals(deps)...)
 
 """
     @causify([settings..., ] expr)
 
 This wraps normal Julia expressions inside a `causify()` function, and is the most convenient way to create causal variables.
 This macro does not work for Distributions, for which you must use `causify()`.
-At the moment there may or may not be a heinous abomination of code making this work. 
+The resulting `CausalVariable` is fully type-inferred at the call site.
 
 ```julia
 u = @causify Uniform(0,1) # ❌ usually not going to do what you want (unless you are wanted to parameterise the distribution itself with causal variables)
@@ -126,12 +123,11 @@ end
 
 # Rule 1: Causify expressions 
 function _causify_expr(expr, settings)
-    if !(expr isa Expr) && :constants ∉ settings return expr end 
+    if !(expr isa Expr) && :constants ∉ settings return expr end
     sym_tuple = Expr(:tuple, filter(e -> e isa Symbol && occursin(r"^[a-zA-Z_]", string(e)), collect(leaves(expr)))...)
-    quote 
-        Base.invokelatest($_causify_all, $sym_tuple -> $expr, $sym_tuple...; settings = $settings)
-    end
-end 
+    target = :constants in settings ? _causify_all_constants : _causify_all
+    return :($target($sym_tuple -> $expr, $sym_tuple...))
+end
 
 # Rule 2: Allow assignment statements through
 function _causify_assignment(expr, settings)
