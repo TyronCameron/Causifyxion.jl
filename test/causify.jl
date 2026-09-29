@@ -103,3 +103,14 @@ end
     @test df isa DataFrame
     @test df.x[1] == 0.5
 end
+
+@testset "ergonomics" begin
+    x = causify(Uniform(0,1))
+    y = causify(x) do x 
+        x^2
+    end 
+
+    setvalue!(x, 1)
+    @test resolve!(y) == 1
+end
+

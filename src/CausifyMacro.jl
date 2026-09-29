@@ -44,7 +44,7 @@ Example:
 a = causify(Normal(1,1))
 b = 20
 x = @causify a + b
-@assert x isa CausalVariable && x.dependson = (a,)
+@assert x isa CausalVariable && x.dependson == (a,)
 ```
 
 This is equivalent to doing: 
@@ -73,6 +73,7 @@ Example:
 ```julia
 x = causify(Normal(0, 1))
 y = @causify x^2
+z = 10
 
 @causify begin 
     a = x + y 
@@ -94,7 +95,7 @@ Example:
 x = causify(Normal(0, 1))
 y = @causify x^2
 
-@causify begin 
+@causify :constants begin 
     a = x + y 
     b = x + z 
     c = 15
