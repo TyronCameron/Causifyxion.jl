@@ -13,7 +13,7 @@ export CausalVariable,
     isknown, isunknown,
     isanyknown, isnothingknown, dependson, 
     ValueAlreadyKnownError,
-    resolve!, refresh!, simulate!, simulate!,
+    resolve!, refresh!, simulate!, simulate,
     causify, @causify
 
 """
@@ -57,7 +57,7 @@ This enables you to:
 """
 mutable struct CausalVariable{T}
     value::Possible{T}
-    resolver::Function
+    resolver
     dependencies::Vector{<:CausalVariable}
 end
 Taproots.children(causalvar::CausalVariable) = causalvar.dependencies
@@ -69,7 +69,7 @@ function Base.show(io::IO, causalvar::CausalVariable)
         Unknown => "CausalVariable(Unknown::$(type))"
         Known(x) => "CausalVariable($(x)::$(type))"
     end
-    show(io, value)
+    print(io, value)
 end 
 
 """
@@ -94,9 +94,9 @@ end # third way, defines z to be x + y, and type hints at z's eltype.
 You may find the type hinting useful in some scenarios. In our case, it is redundant and will automatically be inferred. 
 Also see `@causify` for another convenient way to call this function. 
 """
-causify(resolver::Function, ::Type{T}, dependencies::CausalVariable...) where T = CausalVariable{T}(Unknown, resolver, collect(dependencies))
-causify(distr::Distribution) = causify(() -> rand(distr), eltype(distr))
-function causify(resolver::F, dependencies::CausalVariable...) where {F<:Function}
+causify(resolver, ::Type{T}, dependencies::CausalVariable...) where T = CausalVariable{T}(Unknown, resolver, collect(dependencies))
+causify(distr::Distribution) = causify(() -> rand(distr))
+function causify(resolver, dependencies::CausalVariable...) 
     T = Base.promote_op(resolver, eltype.(dependencies)...)
     causify(resolver, T === Union{} ? Any : T, dependencies...)
 end
@@ -116,8 +116,8 @@ end
 
 Sets the value that is wrapped within the causalvar. `value` must be of type `T` where `T` is the eltype of `causalvar`. 
 """
-function setvalue!(causalvar::CausalVariable{T}, value::T) where T
-    causalvar.value = Known{T}(value)
+function setvalue!(causalvar::CausalVariable{T}, value) where T
+    causalvar.value = Known{T}(convert(T, value))
     return causalvar
 end
 
@@ -132,9 +132,9 @@ isknown(causalvar::CausalVariable) = @cases causalvar.value begin
 end
 
 """
-    isknown(causalvar)
+    isunknown(causalvar)
 
-`true` is the causalvar has a known value (i.e. has been previously sampled). `false` otherwise.
+`true` is the causalvar has an unknown value (i.e. has not been previously sampled). `false` otherwise.
 """
 isunknown(causalvar::CausalVariable) = !isknown(causalvar)
 
@@ -154,6 +154,22 @@ end
 Checks where the parent depends on the child, recursively. If it doesn't depend, then obviously changing the `child` is not going to change `parent`. 
 """
 dependson(parent::CausalVariable, child::CausalVariable) = isparent(parent, child)
+
+"""
+    isindependent(x, y)
+
+Checks whether the two variables `x` and `y` are independent. This is recursive in the sense that it will check for all dependents of both variables. 
+"""
+function isindependent(x::CausalVariable, y::CausalVariable)
+    dependencies = Base.IdSet{CausalVariable}()
+    for dependency in preorder(x)
+        push!(dependencies, dependency)
+    end
+    return !any(y -> y ∈ dependencies, preorder(y))
+end
+
+# !isparent(x, y) && !isparent(y, x)
+
 
 """
     isanyknown(causalvar::CausalVariable...)
@@ -284,14 +300,14 @@ using DataFrames
 df = DataFrame(collect(rigged_tuple), [:x, :y])
 ```
 """
-function simulate!(intervention_function!::Function, causalvar::CausalVariable...)
+function simulate!(intervention_function!, causalvar::CausalVariable...)
     refresh!(causalvar...)
     intervention_function!()
     return resolve!(causalvar...)
 end
 simulate!(causalvar::CausalVariable...) = simulate!(() -> (), causalvar...)
 
-function simulate!(intervention_function!::Function, n::Int, causalvar::CausalVariable...) 
+function simulate!(intervention_function!, n::Int, causalvar::CausalVariable...) 
     values = zip((simulate!(intervention_function!, causalvar...) for _ in 1:n)...) .|> collect 
     return length(causalvar) == 1 ? values : Tuple(values)
 end 
@@ -305,7 +321,7 @@ This starts and leaves your variables in an unknown state.
 
 If you encounter errors, try calling `refresh!` before running this. 
 """
-function simulate(intervention_function!::Function, causalvar::CausalVariable...)
+function simulate(intervention_function!, causalvar::CausalVariable...)
     if isanyknown(causalvar...) 
         error(ValueAlreadyKnownError, "You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvar")
     end 
@@ -316,7 +332,7 @@ function simulate(intervention_function!::Function, causalvar::CausalVariable...
 end
 simulate(causalvar::CausalVariable...) = simulate(() -> (), causalvar...)
 
-function simulate(intervention_function!::Function, n::Int, causalvar::CausalVariable...)
+function simulate(intervention_function!, n::Int, causalvar::CausalVariable...)
     if isanyknown(causalvar...) 
         error(ValueAlreadyKnownError, "You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvar")
     end 
