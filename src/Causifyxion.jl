@@ -9,12 +9,12 @@ using SumTypes
 using Distributions: Distribution
 
 export CausalVariable,
-    ValueUnknownError, getvalue, setvalue!, 
+    ValueUnknownError, getvalue, setvalue!,
     isknown, isunknown,
-    isanyknown, isnothingknown, dependson, 
+    isanyknown, isnothingknown, dependson, isindependent,
     ValueAlreadyKnownError,
     resolve!, refresh!, simulate!, simulate,
-    causify, @causify
+    causify, @causify, given
 
 """
     Possible{T}
@@ -168,9 +168,6 @@ function isindependent(x::CausalVariable, y::CausalVariable)
     return !any(y -> y ∈ dependencies, preorder(y))
 end
 
-# !isparent(x, y) && !isparent(y, x)
-
-
 """
     isanyknown(causalvar::CausalVariable...)
 
@@ -284,9 +281,9 @@ Examples for multiplie simulations:
 x = causify(Uniform(0,1))
 y = @causify x^2 # define y as x^2
 
-mat = simulate!(5, x, y) # first column = 5 fresh samples of x, second column = 5 fresh samples of y; those samples are consistent in each row
+xs, ys = simulate!(5, x, y) # xs = 5 fresh samples of x, ys = 5 fresh samples of y; those samples are consistent in each row
 
-@assert all(mat[:,1] .^ 2 .== mat[:,2]) # every value in column 1 squared equals every value in column 2
+@assert all(xs .^ 2 .== ys) # every value in xs squared equals the corresponding value in ys
 
 rigged_tuple = simulate!(5, x, y) do
     setvalue!(x, 0.5)
@@ -307,10 +304,21 @@ function simulate!(intervention_function!, causalvar::CausalVariable...)
 end
 simulate!(causalvar::CausalVariable...) = simulate!(() -> (), causalvar...)
 
-function simulate!(intervention_function!, n::Int, causalvar::CausalVariable...) 
-    values = zip((simulate!(intervention_function!, causalvar...) for _ in 1:n)...) .|> collect 
-    return length(causalvar) == 1 ? values : Tuple(values)
-end 
+function simulate!(intervention_function!, n::Int, causalvar::CausalVariable...)
+    k = length(causalvar)
+    columns = ntuple(j -> Vector{eltype(causalvar[j])}(undef, n), k)
+    for i in 1:n
+        row = simulate!(intervention_function!, causalvar...)
+        if k == 1
+            columns[1][i] = row
+        else
+            for j in 1:k
+                columns[j][i] = row[j]
+            end
+        end
+    end
+    return k == 1 ? columns[1] : columns
+end
 simulate!(n::Int, causalvar::CausalVariable...) = simulate!(() -> (), n, causalvar...)
 
 """
@@ -333,12 +341,12 @@ end
 simulate(causalvar::CausalVariable...) = simulate(() -> (), causalvar...)
 
 function simulate(intervention_function!, n::Int, causalvar::CausalVariable...)
-    if isanyknown(causalvar...) 
+    if isanyknown(causalvar...)
         error(ValueAlreadyKnownError, "You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvar")
-    end 
-    values = zip((simulate!(intervention_function!, causalvar...) for _ in 1:n)...) .|> collect 
+    end
+    result = simulate!(intervention_function!, n, causalvar...)
     refresh!(causalvar...)
-    return length(causalvar) == 1 ? values : Tuple(values)
+    return result
 end
 simulate(n::Int, causalvar::CausalVariable...) = simulate(() -> (), n, causalvar...)
 
@@ -356,6 +364,15 @@ function invalidate!(parent::CausalVariable, child::CausalVariable)
     end 
     return parent
 end
+
+"""
+    given(x::CausalVariable{T}, y::CausalVariable{<:Union{Bool, Missing}})
+
+Creates a sampleable CausalVariable which represents the event `x` | `y`. 
+This extends the doman of `x` into Union{T, Missing}, and enables rejection sampling. 
+"""
+given(x::CausalVariable, y::CausalVariable{<:Union{Bool, Missing}}) = causify((x,y) -> y === true ? x : missing, x, y)
+Base.:|(x::CausalVariable, y::CausalVariable{<:Union{Bool, Missing}}) = given(x, y)
 
 # Include the @causify macro
 include(joinpath(@__DIR__, "CausifyMacro.jl"))

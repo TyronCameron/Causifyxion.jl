@@ -106,11 +106,66 @@ end
 
 @testset "ergonomics" begin
     x = causify(Uniform(0,1))
-    y = causify(x) do x 
+    y = causify(x) do x
         x^2
-    end 
+    end
 
     setvalue!(x, 1)
     @test resolve!(y) == 1
+end
+
+@testset "Independence" begin
+    x1 = causify(Normal(0,1))
+    x2 = causify(Normal(0,1))
+    @test isindependent(x1, x2)
+
+    z = causify(x1) do x1
+        x1^2
+    end
+    @test !isindependent(x1, z)
+    @test !isindependent(z, x1)
+
+    s = causify(Normal(0,1))
+    x = causify(x1, s) do x1, s
+        x1 + s
+    end
+    a = causify(s) do s
+        s + 1
+    end
+    @test !isindependent(x, a) # share common cause s
+    @test isindependent(x1, a) # a doesn't involve x1 at all
+end
+
+@testset "Conditional probability (given / |)" begin
+    A = causify(Bernoulli(0.7))
+    B = causify(A) do a
+        rand(Bernoulli(a ? 0.9 : 0.1))
+    end
+
+    conditioned = B | A # B's value when A is true, else missing
+
+    n = 20_000
+    samples = simulate!(n, conditioned)
+    @test eltype(samples) == Union{Bool,Missing}
+
+    kept = collect(skipmissing(samples))
+    p_a = count(!ismissing, samples) / n
+    p_b_given_a = count(kept) / length(kept)
+
+    @test isapprox(p_a, 0.7; atol = 0.03)
+    @test isapprox(p_b_given_a, 0.9; atol = 0.05)
+end
+
+@testset "simulate! timing" begin
+    x = causify(Normal(0,1))
+    y = causify(x) do x
+        x^2
+    end
+
+    cold = @elapsed simulate!(10_000, x, y)
+    @test cold < 30 # generous: guards against the zip-splat compile-time blowup regressing, not a microbenchmark
+
+    warm = @elapsed simulate!(10_000, x, y)
+    @test warm < 2.0 # steady-state call, observed ~0.03s
 end
 
