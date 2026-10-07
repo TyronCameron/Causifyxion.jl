@@ -366,6 +366,22 @@ function invalidate!(parent::CausalVariable, child::CausalVariable)
 end
 
 """
+    replicate(causalvar::CausalVariable, keep::CausalVariable...)
+
+Gains a fresh version 
+"""
+function replicate(causalvar::CausalVariable, keep::CausalVariable...)
+    ignored = Set{CausalVariable}(keep)
+    causalvar in ignored && return causalvar
+    copies = Dict{CausalVariable, CausalVariable}(s => s for s in keep)
+    for node in postorder(causalvar; connector = (_, child) -> child ∉ ignored)
+        dependencies = CausalVariable[copies[dep] for dep in node.dependencies]
+        copies[node] = typeof(node)(Unknown, node.resolver, dependencies)
+    end
+    return copies[causalvar]
+end
+
+"""
     given(x::CausalVariable{T}, y::CausalVariable{<:Union{Bool, Missing}})
 
 Creates a sampleable CausalVariable which represents the event `x` | `y`. 
