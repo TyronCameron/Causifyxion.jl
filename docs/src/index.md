@@ -2,17 +2,17 @@
 
 ## Intro
 
-Causifyxion is a library to help create and manage causally-related variables. 
+Causifyxion is a library to help create and manage causally-related variables. This library is different from most other libraries because it focuses on variables first (in particular, only thereafter tying in the concept of a distribution). 
 
-That includes:
+Causifyxion helps with:
 
 - Setting up functions which run when needed but whose results are otherwise cached.
 - Tracking dependencies between variables. 
 - Setting up random, sampleable variables from a `Distribution`, or any other sampleable method. 
 
-The original intention behind this package was to build a statistical (random) library with a sampling- or variable-first approach. However, the naming in this package has been kept general to facilitate thinking in a broader scope. As such, there is no requirement that any variable needs to come from a sampleable distribution. 
+The original intention behind this package was to build a statistical (random) library with a sampling- or variable-first approach. However, the naming in this package has been kept general to facilitate thinking in a broader scope. As such, there is no requirement that any variable needs to come from a probabilistic distribution. 
 
-The principle is straightforward: you create a variable (instead of a distribution or function), and you specify the dependencies. At it's simplest we might have:
+The principle is straightforward: you create a variable by specifying how to calculate it, and you specify the dependencies. These variables need not be numbers -- they can be anything, including functions or even CausalVariables themselves. At its simplest we might have:
 
 ```julia
 using Dates
@@ -24,13 +24,13 @@ end
 @assert eltype(x) <: String
 ```
 
-Up to this point, `x` is just a container for a mechanism to sample the value. It has no inherent value itself yet. Indeed if we try to look inside the variable:
+Up to this point, `x` is just a container for a mechanism to sample the value. It has no inherent value itself yet. Indeed if we try to look inside the variable, we get an error:
 
 ```julia
 getvalue(x) # throws a `ValueUnknownError`
 ```
 
-Instead we can resolve the value of the variable (if it does not have a value already) by executing the function inside it:
+Instead we can resolve the value of the variable by executing the function inside it:
 
 ```julia
 underlying_value = resolve!(x) # returns either "Yes" or "No"
@@ -39,20 +39,21 @@ underlying_value = resolve!(x) # returns either "Yes" or "No"
 `resolve!` also sets the value of `x`, so that:
 
 ```julia
-@assert getvalue(x) == underlying_value
+@assert getvalue(x) === underlying_value
 ```
 
 Calling `resolve!` repeatedly will yield the exact same result, even if 30 seconds passes, because the resolved value is stored. We can restore a fresh state on `x` by using: 
 
 ```julia
 refresh!(x)
-getvalue(x) # throws a `ValueUnknownError`
+new_underlying_value = resolve!(x) # returns a new value 
 ```
 
-Finally, we can create a Directed Acyclic Graph (DAG) for `CausalVariables`. For example:
+This is not so useful on its own. We could simply memoise the function. It starts to get useful when we create Directed Acyclic Graphs (DAG) of `CausalVariables`. For example:
 
 ```julia
 using Distributions
+x = causify(Normal(10,3))
 y = causify(Uniform(0,1))
 
 z = causify(x, y) do x, y 
@@ -65,6 +66,7 @@ end
 ```
 
 When I call `resolve!(z)`, it will act on the entire dependency tree (i.e. recursively) of `z`. Same thing when I call `refresh!`. 
+`resolve!`ing once might not be enough. You might wish for many of them. In that case, you can `simulate!`: 
 
 ```julia
 refresh!(z) 
@@ -76,7 +78,7 @@ using DataFrames
 df = DataFrame(collect(simulate(10, x, y, z)), [:x, :y, :z])
 ```
 
-Finally, it's possible to invalidate all downstream caches between a parent and an invalid cache item recursively, as follows: 
+It's also possible to invalidate all downstream caches between a parent and an invalid cache item recursively (but leave every dependency of `x` intact) as follows: 
 
 ```julia
 resolve!(z) # ensure we have some values
@@ -204,8 +206,6 @@ resolve!(causalcomplex)
 @assert getvalue(causalcomplex) == getvalue(causal) + const1 + const2 + getvalue(causalconst)^2
 ```
 
-Admittedly I struggled to write this macro and make some compromises on what it does. Contributions (by wizards) are of course welcome to improve it. Perhaps at some point I will either improve the macro for type inference or allow passing through a type to help infer what it should be.
-
 ## Getting and setting values recursively
 
 Let's set up some variables:
@@ -282,6 +282,149 @@ end
 
 avg_z_given_x = sum(z_vals_given_x) / length(z_vals_given_x)
 ```
+
+## Causal Analysis
+
+Judea Pearl's "Ladder of Causation" describes three distinct levels of causal reasoning:
+**association** (what do we observe?), **intervention** (what if we *do* something?), and
+**counterfactuals** (what *would* have happened, given what we know actually happened?).
+Causifyxion's variable-first design makes each rung a direct, natural translation of the
+corresponding API call.
+
+A small causal model to use throughout this section:
+
+```julia
+using Distributions
+
+u = causify(Normal(0, 1))   # unobserved background noise
+x = causify(Uniform(0, 5))  # the variable we're interested in explaining / intervening on
+
+y = causify(x, u) do x, u
+    2x + u
+end
+```
+
+### Rung 1: Association (seeing)
+
+The first rung is just observing the system as it naturally unfolds. This is exactly
+`simulate!`/`simulate`:
+
+```julia
+observed_y = simulate!(y)              # one fresh, fully natural observation
+
+refresh!(y)                            # simulate (no !) requires a fully unknown start
+yvals = simulate(1000, y)              # a sample of natural observations
+average_y = sum(yvals) / length(yvals)
+```
+
+Both `x` and `u` are left free to vary according to their own mechanisms here, exactly as
+they would "in the wild".
+
+### Rung 2: Intervention (doing)
+
+The second rung asks what happens if we reach in and force a variable to a value, severing
+it from its own mechanism -- Pearl's `do(X = x)`. This is the intervention-function form of
+`simulate!`/`simulate`:
+
+```julia
+# do(x = 3): x is forced to 3 on every draw; u is still left free to vary.
+y_given_do_x = simulate(1000, y) do
+    setvalue!(x, 3.0)
+end
+average_y_given_do_x = sum(y_given_do_x) / length(y_given_do_x)
+```
+
+This is *not* the same as conditioning on having observed `x == 3` (a Rung-1 question,
+answered by filtering natural observations) -- here `x` never had a chance to be anything
+else, on any draw.
+
+### Rung 3: Counterfactuals (imagining)
+
+The third rung asks: given that we *observed* a particular outcome (and therefore a
+particular, now-fixed background state of the world), what would that outcome have been had
+one variable been different -- with everything else about that same world held fixed? This
+needs Pearl's "abduction" then "action": resolve once to fix the background to the values
+that actually produced what we saw, then change the variable of interest and recompute
+*without* letting the background change too.
+
+**Approach A -- mutate in place with `setvalue!`:**
+
+```julia
+refresh!(y)
+factual_y = resolve!(y)                    # observe the world -- fixes x and u
+factual_x, factual_u = getvalue(x), getvalue(u)
+
+setvalue!(x, factual_x + 1)                # action: what if x had been one more than it was?
+setunknown!(y)                 # forget y's cached (factual) value so it recomputes
+counterfactual_y = resolve!(y)             # recompute y, re-using the SAME u
+
+@assert getvalue(u) == factual_u            # the background noise was never disturbed
+@assert counterfactual_y ≈ factual_y + 2    # y = 2x + u, so +1 to x means +2 to y
+```
+
+`setvalue!` doesn't care whether `x` was known or unknown, so it can overwrite the factual
+value directly. `resolve!` only recomputes a variable if it's currently `Unknown` though, so
+`y`'s own stale cached (factual) value has to be cleared too -- here with `setunknown!`, since
+`x` and `y` are directly connected. For a response several steps downstream of the variable
+you're intervening on, `invalidate!(y, x)` clears every node strictly between `x`
+and `y`; note it leaves `y` itself untouched too, so pair it with `setunknown!(y)` the same way.
+(`setunknown!` and `invalidate!` are internal helpers, not exported -- call them as
+`setunknown!`/`invalidate!`, or `import Causifyxion: setunknown!,
+invalidate!` once if you'd rather not qualify them every time.)
+
+**Approach B -- branch off a fresh world with `replicate`:**
+
+`replicate` doesn't destroy your factual observation: it builds an independent copy of the
+dependency tree, sharing only the nodes you name to `keep`.
+
+```julia
+refresh!(y)
+factual_y = resolve!(y)                    # observe/abduct, same as above
+
+y_cf = replicate(y, u)         # fresh, unknown copies of x and y; u is shared
+x_cf, u_shared = y_cf.dependencies
+
+@assert u_shared === u                     # same background noise object
+@assert x_cf !== x                         # independent copy of x
+
+setvalue!(x_cf, getvalue(x) + 1)           # the same counterfactual action as Approach A
+counterfactual_y2 = resolve!(y_cf)
+
+@assert counterfactual_y2 ≈ factual_y + 2       # same +1-to-x => +2-to-y relationship
+@assert isknown(y) && getvalue(y) == factual_y  # the original, factual `y` is untouched
+```
+
+Approach B is especially convenient when comparing several counterfactual scenarios against
+the same factual observation side by side, since none of them interfere with each other or
+with the original.
+
+## Faster sampling with `Population`
+
+When you need a *large* number of independent, identically-distributed samples of a single
+`CausalVariable` -- e.g. Rung-1 questions like estimating `E[Y]`, or building an empirical
+distribution -- `simulate(n, causalvar)` resolves the whole dependency tree fresh,
+sequentially, `n` times. For large `n`, `population` is a faster alternative: it builds `k`
+independent replicas of your variable up front and spreads the `n` draws across them in
+parallel.
+
+```julia
+x = causify(Normal(0, 1))
+
+pop = population(100_000, x)      # k defaults to Threads.nthreads()
+samples = resolve!(pop)           # a Vector{Float64} of 100,000 independent draws, in parallel
+
+@assert length(samples) == 100_000
+```
+
+Like any other `CausalVariable`, a `Population` caches its resolved value until `refresh!`ed,
+and works with `simulate!`/`simulate` too:
+
+```julia
+fresh_samples = simulate!(pop)    # refresh! + resolve!, in one call
+```
+
+`k` only buys real parallelism if Julia itself is started with multiple threads
+(`julia -t auto`); pass it explicitly with `population(n, x; k = 8)` to control it directly.
 
 ## Useful features of sampling-first
 

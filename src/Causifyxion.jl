@@ -9,12 +9,17 @@ using SumTypes
 using Distributions: Distribution
 
 export CausalVariable,
-    ValueUnknownError, getvalue, setvalue!,
+    ValueUnknownError, getvalue, setvalue!, setunknown!,
     isknown, isunknown,
     isanyknown, isnothingknown, dependson, isindependent,
     ValueAlreadyKnownError,
-    resolve!, refresh!, simulate!, simulate,
-    causify, @causify, given
+    resolve!, refresh!, simulate!, simulate, invalidate!,
+    causify, @causify, given,
+    isexclusive, isexhaustive, isbasis,
+    degree,
+    replicate, Population, population
+
+abstract type AbstractCausalVariable end 
 
 """
     Possible{T}
@@ -55,14 +60,15 @@ This enables you to:
 - Sample from a few dependent variables conveniently without needing to wrap it in one ugly function / closure 
 - Manually intervene in the system and resample with your interventions
 """
-mutable struct CausalVariable{T}
+mutable struct CausalVariable{T,F} <: AbstractCausalVariable
     value::Possible{T}
-    resolver
-    dependencies::Vector{<:CausalVariable}
+    resolver::F
+    dependencies::Vector{<:AbstractCausalVariable}
 end
-Taproots.children(causalvar::CausalVariable) = causalvar.dependencies
-Taproots.setchildren!(causalvar::CausalVariable, children) = (causalvar.dependencies = children; causalvar)
-Base.eltype(::CausalVariable{T}) where T = T
+Taproots.children(causalvar::AbstractCausalVariable) = causalvar.dependencies
+Base.copy(cv::CausalVariable{T,F}) where {T,F} = CausalVariable{T,F}(cv.value, cv.resolver, copy(cv.dependencies))
+Taproots.setchildren!(causalvar::AbstractCausalVariable, children) = (causalvar.dependencies = children; causalvar)
+Base.eltype(::CausalVariable{T,F}) where {T, F} = T
 function Base.show(io::IO, causalvar::CausalVariable) 
     type = eltype(causalvar)
     value = @cases causalvar.value begin
@@ -94,20 +100,25 @@ end # third way, defines z to be x + y, and type hints at z's eltype.
 You may find the type hinting useful in some scenarios. In our case, it is redundant and will automatically be inferred. 
 Also see `@causify` for another convenient way to call this function. 
 """
-causify(resolver, ::Type{T}, dependencies::CausalVariable...) where T = CausalVariable{T}(Unknown, resolver, collect(dependencies))
+causify(resolver, ::Type{T}, dependencies::NTuple{N,AbstractCausalVariable}) where {T,N} = 
+    CausalVariable{T, typeof(resolver)}(Unknown, resolver, collect(dependencies))
+causify(resolver, ::Type{T}, dependencies::AbstractCausalVariable...) where T = causify(resolver, T, dependencies)
+
 causify(distr::Distribution) = causify(() -> rand(distr))
-function causify(resolver, dependencies::CausalVariable...) 
+
+function causify(resolver, dependencies::NTuple{N,AbstractCausalVariable}) where N
     T = Base.promote_op(resolver, eltype.(dependencies)...)
-    causify(resolver, T === Union{} ? Any : T, dependencies...)
+    causify(resolver, T === Union{} ? Any : T, dependencies)
 end
+causify(resolver, dependencies::AbstractCausalVariable...) = causify(resolver, dependencies)
 
 """
     getvalue(causalvar::CausalVariable)
 
 Returns the value that is wrapped within the causalvar.
 """
-getvalue(causalvar::CausalVariable) = @cases causalvar.value begin 
-    Unknown => error(ValueUnknownError, " Can't get the value of an unknown value! Perhaps call resolve!(your_variable) first. The variable you attempted to get the value of was $causalvar")
+getvalue(causalvar::AbstractCausalVariable) = @cases causalvar.value begin 
+    Unknown => error(ValueUnknownError, "Can't get the value of an unknown value! Perhaps call resolve!(your_variable) first. The variable you attempted to get the value of was $causalvar")
     Known(x) => x
 end
 
@@ -116,7 +127,8 @@ end
 
 Sets the value that is wrapped within the causalvar. `value` must be of type `T` where `T` is the eltype of `causalvar`. 
 """
-function setvalue!(causalvar::CausalVariable{T}, value) where T
+function setvalue!(causalvar::AbstractCausalVariable, value)
+    T = eltype(causalvar)
     causalvar.value = Known{T}(convert(T, value))
     return causalvar
 end
@@ -126,7 +138,7 @@ end
 
 `true` is the causalvar has a known value (i.e. has been previously sampled). `false` otherwise.
 """ 
-isknown(causalvar::CausalVariable) = @cases causalvar.value begin
+isknown(causalvar::AbstractCausalVariable) = @cases causalvar.value begin
     Unknown => false 
     Known(x) => true
 end
@@ -136,14 +148,14 @@ end
 
 `true` is the causalvar has an unknown value (i.e. has not been previously sampled). `false` otherwise.
 """
-isunknown(causalvar::CausalVariable) = !isknown(causalvar)
+isunknown(causalvar::AbstractCausalVariable) = !isknown(causalvar)
 
 """
     setunknown!(causalvar)
 
 Sets the value of the causal variable back to `Unknown`.
 """
-function setunknown!(causalvar)
+function setunknown!(causalvar::AbstractCausalVariable)
     causalvar.value = Unknown
     return causalvar
 end
@@ -153,15 +165,15 @@ end
 
 Checks where the parent depends on the child, recursively. If it doesn't depend, then obviously changing the `child` is not going to change `parent`. 
 """
-dependson(parent::CausalVariable, child::CausalVariable) = isparent(parent, child)
+dependson(parent::AbstractCausalVariable, child::AbstractCausalVariable) = isparent(parent, child)
 
 """
     isindependent(x, y)
 
 Checks whether the two variables `x` and `y` are independent. This is recursive in the sense that it will check for all dependents of both variables. 
 """
-function isindependent(x::CausalVariable, y::CausalVariable)
-    dependencies = Base.IdSet{CausalVariable}()
+function isindependent(x::AbstractCausalVariable, y::AbstractCausalVariable)
+    dependencies = Set()
     for dependency in preorder(x)
         push!(dependencies, dependency)
     end
@@ -173,15 +185,17 @@ end
 
 Checks whether `causalvar` is known, or any of its dependencies are known. 
 """
-isanyknown(causalvar::CausalVariable) = any(isknown, postorder(causalvar))
-isanyknown(causalvar::CausalVariable...) = any(isanyknown, causalvar)
+isanyknown(causalvar::AbstractCausalVariable) = any(isknown, postorder(causalvar))
+isanyknown(causalvar::NTuple{N,AbstractCausalVariable}) where N = any(isanyknown, causalvar)
+isanyknown(causalvar::AbstractCausalVariable...) = isanyknown(causalvar)
 
 """
     isnothingknown(causalvar::CausalVariable...)
 
 Checks whether `causalvar` is unknown, and all of its dependencies are unknown. 
 """
-isnothingknown(causalvar::CausalVariable...) = !isanyknown(causalvar...)
+isnothingknown(causalvar::NTuple{N,AbstractCausalVariable}) where N = !isanyknown(causalvar)
+isnothingknown(causalvar::AbstractCausalVariable...) = isnothingknown(causalvar)
 
 """
     ValueAlreadyKnownError
@@ -208,7 +222,7 @@ second_sample = resolve!(x)
 
 `resolve!` recursively modifies all CausalVariables beneath it, by design, because it samples them all. 
 """
-function resolve!(causalvar::CausalVariable)
+function resolve!(causalvar::AbstractCausalVariable)
     if isknown(causalvar) return getvalue(causalvar) end
     for child in postorder(causalvar; connector = (parent, child) -> isunknown(child))
         values = getvalue.(child.dependencies)
@@ -216,7 +230,9 @@ function resolve!(causalvar::CausalVariable)
     end 
     return getvalue(causalvar)
 end
-resolve!(causalvar::CausalVariable...) = resolve!.(causalvar)
+resolve!(causalvar::Tuple{AbstractCausalVariable}) = resolve!(causalvar[1])
+resolve!(causalvar::NTuple{N,AbstractCausalVariable}) where N = resolve!.(causalvar)
+resolve!(causalvar::AbstractCausalVariable...) = resolve!(causalvar)
 
 """
     refresh!(causalvar::CausalVariable...)
@@ -242,13 +258,15 @@ refresh!(y)
 @assert isunknown(y) # This value was refreshed directly 
 ```
 """
-function refresh!(causal_variable::CausalVariable)
+function refresh!(causal_variable::AbstractCausalVariable)
     for child in postorder(causal_variable)
         setunknown!(child)
     end 
     return causal_variable
 end
-refresh!(causalvar::CausalVariable...) = refresh!.(causalvar)
+refresh!(causalvar::Tuple{AbstractCausalVariable}) = refresh!(causalvar[1])
+refresh!(causalvar::NTuple{N,AbstractCausalVariable}) where N = refresh!.(causalvar)
+refresh!(causalvar::AbstractCausalVariable...) = refresh!(causalvar)
 
 """
     simulate!([intervention_function::Function, n::Int, ]causalvar::CausalVariable...)
@@ -297,18 +315,20 @@ using DataFrames
 df = DataFrame(collect(rigged_tuple), [:x, :y])
 ```
 """
-function simulate!(intervention_function!, causalvar::CausalVariable...)
-    refresh!(causalvar...)
+function simulate!(intervention_function!, causalvar::NTuple{N,AbstractCausalVariable}) where N
+    refresh!(causalvar)
     intervention_function!()
-    return resolve!(causalvar...)
+    return resolve!(causalvar)
 end
-simulate!(causalvar::CausalVariable...) = simulate!(() -> (), causalvar...)
+simulate!(intervention_function!, causalvar::AbstractCausalVariable...) = simulate!(intervention_function!, causalvar)
+simulate!(causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate!(() -> (), causalvar)
+simulate!(causalvar::AbstractCausalVariable...) = simulate!(causalvar)
 
-function simulate!(intervention_function!, n::Int, causalvar::CausalVariable...)
+function simulate!(intervention_function!, n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N
     k = length(causalvar)
     columns = ntuple(j -> Vector{eltype(causalvar[j])}(undef, n), k)
     for i in 1:n
-        row = simulate!(intervention_function!, causalvar...)
+        row = simulate!(intervention_function!, causalvar)
         if k == 1
             columns[1][i] = row
         else
@@ -319,7 +339,9 @@ function simulate!(intervention_function!, n::Int, causalvar::CausalVariable...)
     end
     return k == 1 ? columns[1] : columns
 end
-simulate!(n::Int, causalvar::CausalVariable...) = simulate!(() -> (), n, causalvar...)
+simulate!(intervention_function!, n::Int, causalvar::AbstractCausalVariable...) = simulate!(intervention_function!, n, causalvar)
+simulate!(n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate!(() -> (), n, causalvar)
+simulate!(n::Int, causalvar::AbstractCausalVariable...) = simulate!(n, causalvar)
 
 """
     simulate([intervention_function::Function, n::Int, ]causalvar::CausalVariable...)
@@ -329,26 +351,30 @@ This starts and leaves your variables in an unknown state.
 
 If you encounter errors, try calling `refresh!` before running this. 
 """
-function simulate(intervention_function!, causalvar::CausalVariable...)
-    if isanyknown(causalvar...) 
-        error(ValueAlreadyKnownError, "You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvar")
-    end 
-    intervention_function!()
-    values = resolve!(causalvar...)
-    refresh!(causalvar...)
-    return values
-end
-simulate(causalvar::CausalVariable...) = simulate(() -> (), causalvar...)
-
-function simulate(intervention_function!, n::Int, causalvar::CausalVariable...)
-    if isanyknown(causalvar...)
+function simulate(intervention_function!, causalvar::NTuple{N,AbstractCausalVariable}) where N
+    if isanyknown(causalvar)
         error(ValueAlreadyKnownError, "You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvar")
     end
-    result = simulate!(intervention_function!, n, causalvar...)
-    refresh!(causalvar...)
+    intervention_function!()
+    values = resolve!(causalvar)
+    refresh!(causalvar)
+    return values
+end
+simulate(intervention_function!, causalvar::AbstractCausalVariable...) = simulate(intervention_function!, causalvar)
+simulate(causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate(() -> (), causalvar)
+simulate(causalvar::AbstractCausalVariable...) = simulate(causalvar)
+
+function simulate(intervention_function!, n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N
+    if isanyknown(causalvar)
+        error(ValueAlreadyKnownError, "You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvar")
+    end
+    result = simulate!(intervention_function!, n, causalvar)
+    refresh!(causalvar)
     return result
 end
-simulate(n::Int, causalvar::CausalVariable...) = simulate(() -> (), n, causalvar...)
+simulate(intervention_function!, n::Int, causalvar::AbstractCausalVariable...) = simulate(intervention_function!, n, causalvar)
+simulate(n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate(() -> (), n, causalvar)
+simulate(n::Int, causalvar::AbstractCausalVariable...) = simulate(n, causalvar)
 
 """
     invalidate!(parent::CausalVariable, child::CausalVariable)
@@ -356,7 +382,7 @@ simulate(n::Int, causalvar::CausalVariable...) = simulate(() -> (), n, causalvar
 Sets the parent, and the child, and all variables on all pathways between them, to be `Unknown`.
 This effectively invalidates the values in upstream variables which are dependent on the `child`, but limited to the scope of the dependencies of the `parent`. 
 """
-function invalidate!(parent::CausalVariable, child::CausalVariable)
+function invalidate!(parent::AbstractCausalVariable, child::AbstractCausalVariable)
     for trace in findtraces(child, parent)
         for t in (trace[1:n] for n in 1:length(trace))
             setunknown!(pluck(parent, t))
@@ -366,20 +392,74 @@ function invalidate!(parent::CausalVariable, child::CausalVariable)
 end
 
 """
-    replicate(causalvar::CausalVariable, keep::CausalVariable...)
+    replicate(causalvar::AbstractCausalVariable, keep::AbstractCausalVariable...)
 
-Gains a fresh version 
+Creates a fresh verison of the `causalvar`, recursively copying each value beneath it, except the variables you have specified, which are shared with the originals. 
 """
-function replicate(causalvar::CausalVariable, keep::CausalVariable...)
-    ignored = Set{CausalVariable}(keep)
+function replicate(causalvar::AbstractCausalVariable, keep::NTuple{N,AbstractCausalVariable}) where N
+    ignored = Set(keep)
     causalvar in ignored && return causalvar
-    copies = Dict{CausalVariable, CausalVariable}(s => s for s in keep)
+    copies = Dict{AbstractCausalVariable, AbstractCausalVariable}(s => s for s in keep)
     for node in postorder(causalvar; connector = (_, child) -> child ∉ ignored)
-        dependencies = CausalVariable[copies[dep] for dep in node.dependencies]
-        copies[node] = typeof(node)(Unknown, node.resolver, dependencies)
+        copies[node] = setchildren!(
+            setunknown!(copy(node)), 
+            map(c -> copies[c], children(node))
+        )
     end
     return copies[causalvar]
 end
+replicate(causalvar::AbstractCausalVariable, keep::AbstractCausalVariable...) = replicate(causalvar, keep)
+replicate(n::Int, causalvar::AbstractCausalVariable, keep::NTuple{N,AbstractCausalVariable}) where N = map(_ -> replicate(causalvar, keep), 1:n)
+replicate(n::Int, causalvar::AbstractCausalVariable, keep::AbstractCausalVariable...) = map(_ -> replicate(causalvar, keep...), 1:n)
+
+"""
+    degree(causalvariable...)
+
+Returns the sum of the in-degree of each variable in the dependencies of the variables above. 
+"""
+degree(causalvariable...) = sum(node -> length(children(node)), preorder(causalvariable...))
+
+"""
+    isexclusive(response, covariates)
+
+No covariate is a dependency of another. 
+These variables can share ancestors or be correlated. They cannot, however, mediate the effect one another on the response. 
+"""
+function isexclusive(response::AbstractCausalVariable, covariates::NTuple{N,AbstractCausalVariable}) where N
+    separators = Set(covariates)
+    length(separators) == N || return false
+    reached = 0
+    for covariate in preorder(response; connector = (parent, _) -> parent ∉ separators)
+        covariate ∉ separators && continue 
+        any(node -> node ∈ separators, Iterators.drop(preorder(covariate), 1)) && return false
+        reached += 1
+    end
+    return reached == N
+end
+isexclusive(response::AbstractCausalVariable, covariates::AbstractCausalVariable...) = isexclusive(response, covariates)
+
+""" 
+    isexhaustive(response, covariates)
+
+Checks whether the set of covariates has all dependencies covered; i.e. there is no path leading to a leaf node which is not covered 
+(that is, no unexplained path). 
+"""
+function isexhaustive(response::AbstractCausalVariable, covariates::NTuple{N,AbstractCausalVariable}) where N
+    separators = Set(covariates)
+    response ∈ separators && return true
+    walk = Iterators.drop(preorder(response; connector = (_, child) -> child ∉ separators), 1)
+    return !any(isleaf, walk)
+end 
+isexhaustive(response::AbstractCausalVariable, covariates::AbstractCausalVariable...) = isexhaustive(response, covariates)
+
+"""
+    isbasis(response, covariates)
+
+Checks whether the list of covariates is a complete and non-confounding description of the response variable.
+"""
+isbasis(response::AbstractCausalVariable, covariates::NTuple{N,AbstractCausalVariable}) where N = 
+    isexclusive(response, covariates) && isexhaustive(response, covariates) 
+isbasis(response::AbstractCausalVariable, covariates::AbstractCausalVariable...) = isbasis(response, covariates)
 
 """
     given(x::CausalVariable{T}, y::CausalVariable{<:Union{Bool, Missing}})
@@ -392,6 +472,9 @@ Base.:|(x::CausalVariable, y::CausalVariable{<:Union{Bool, Missing}}) = given(x,
 
 # Include the @causify macro
 include(joinpath(@__DIR__, "CausifyMacro.jl"))
+
+# Include Population (n i.i.d. replicas of a CausalVariable)
+include(joinpath(@__DIR__, "Populations.jl"))
 
 end  # module Causifyxion
 

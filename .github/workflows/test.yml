@@ -12,6 +12,7 @@ on:
 permissions:
   actions: write
   contents: read
+  pull-requests: write
 
 jobs:
   test:
@@ -38,3 +39,52 @@ jobs:
         if: matrix.julia-version == '1' && matrix.os == 'ubuntu-latest' && matrix.julia-arch == 'x64'
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  benchmark:
+    if: github.event_name == 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1'
+          arch: x64
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - name: Run benchmarks
+        working-directory: test/benchmark
+        run: |
+          julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate()'
+          julia --project=. benchmark.jl
+      - name: Show benchmark results (local/dev)
+        run: |
+          echo "==== Benchmark Results ===="
+          cat test/benchmark/results.md
+          echo "==========================="
+      - name: Comment benchmark results on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const results = fs.readFileSync('test/benchmark/results.md', 'utf8');
+            const body = `## 📊 Benchmark Results
+
+            ${results}
+
+            ---
+            <sub>Updated automatically by CI</sub>`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const botComment = comments.data.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('📊 Benchmark Results')
+            );
+            if (botComment) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: botComment.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
