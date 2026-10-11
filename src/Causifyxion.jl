@@ -65,18 +65,18 @@ This enables you to:
 - Sample from a few dependent variables conveniently without needing to wrap it in one ugly function / closure 
 - Manually intervene in the system and resample with your interventions
 """
-mutable struct CausalVariable{T,F} <: AbstractCausalVariable
-    value::Possible{T}
+mutable struct CausalVariable{T,F,S<:Tuple} <: AbstractCausalVariable
+    value::Base.RefValue{Possible{T}}
     resolver::F
-    dependencies::Vector{<:AbstractCausalVariable}
+    dependencies::Vector{AbstractCausalVariable} # S holds the eltypes of the dependencies
 end
 Taproots.children(causalvar::AbstractCausalVariable) = causalvar.dependencies
-Base.copy(cv::CausalVariable{T,F}) where {T,F} = CausalVariable{T,F}(cv.value, cv.resolver, copy(cv.dependencies))
+Base.copy(cv::CausalVariable{T,F,S}) where {T,F,S} = CausalVariable{T,F,S}(Ref(cv.value[]), cv.resolver, copy(cv.dependencies))
 Taproots.setchildren!(causalvar::AbstractCausalVariable, children) = (causalvar.dependencies = children; causalvar)
-Base.eltype(::CausalVariable{T,F}) where {T, F} = T
+Base.eltype(::CausalVariable{T}) where {T} = T
 function Base.show(io::IO, causalvar::CausalVariable) 
     type = eltype(causalvar)
-    value = @cases causalvar.value begin
+    value = @cases causalvar.value[] begin
         Unknown => "CausalVariable(Unknown::$(type))"
         Known(x) => "CausalVariable($(x)::$(type))"
     end
@@ -106,7 +106,7 @@ You may find the type hinting useful in some scenarios. In our case, it is redun
 Also see `@causify` for another convenient way to call this function. 
 """
 causify(resolver, ::Type{T}, dependencies::NTuple{N,AbstractCausalVariable}) where {T,N} = 
-    CausalVariable{T, typeof(resolver)}(Unknown, resolver, collect(dependencies))
+    CausalVariable{T, typeof(resolver), Tuple{map(eltype, dependencies)...}}(Ref{Possible{T}}(Unknown), resolver, collect(AbstractCausalVariable, dependencies))
 causify(resolver, ::Type{T}, dependencies::AbstractCausalVariable...) where T = causify(resolver, T, dependencies)
 
 causify(distr::Distribution) = causify(() -> rand(distr))
@@ -122,7 +122,7 @@ causify(resolver, dependencies::AbstractCausalVariable...) = causify(resolver, d
 
 Returns the value that is wrapped within the causalvar.
 """
-getvalue(causalvar::AbstractCausalVariable) = @cases causalvar.value begin 
+getvalue(causalvar::AbstractCausalVariable) = @cases causalvar.value[] begin 
     Unknown => throw(ValueUnknownError("Can't get the value of an unknown value! Perhaps call resolve!(your_variable) first. The variable you attempted to get the value of was $causalvar"))
     Known(x) => x
 end
@@ -134,7 +134,7 @@ Sets the value that is wrapped within the causalvar. `value` must be of type `T`
 """
 function setvalue!(causalvar::AbstractCausalVariable, value)
     T = eltype(causalvar)
-    causalvar.value = Known{T}(convert(T, value))
+    causalvar.value[] = Known{T}(convert(T, value))
     return causalvar
 end
 
@@ -143,7 +143,7 @@ end
 
 `true` is the causalvar has a known value (i.e. has been previously sampled). `false` otherwise.
 """ 
-isknown(causalvar::AbstractCausalVariable) = @cases causalvar.value begin
+isknown(causalvar::AbstractCausalVariable) = @cases causalvar.value[] begin
     Unknown => false 
     Known(x) => true
 end
@@ -161,7 +161,7 @@ isunknown(causalvar::AbstractCausalVariable) = !isknown(causalvar)
 Sets the value of the causal variable back to `Unknown`.
 """
 function setunknown!(causalvar::AbstractCausalVariable)
-    causalvar.value = Unknown
+    causalvar.value[] = Unknown
     return causalvar
 end
 
@@ -233,10 +233,21 @@ second_sample = resolve!(x)
 function resolve!(causalvar::AbstractCausalVariable)
     if isknown(causalvar) return getvalue(causalvar) end
     for child in postorder(causalvar; connector = (parent, child) -> isunknown(child))
-        values = getvalue.(child.dependencies)
-        setvalue!(child, child.resolver(values...))
+        resolvenode!(child)
     end 
     return getvalue(causalvar)
+end
+
+# Function barrier: the dependency eltypes `S` let each dependency's value be read with a concrete type
+function resolvenode!(causalvar::CausalVariable{T,F,S}) where {T,F,S}
+    deps = causalvar.dependencies
+    values = ntuple(i -> getvalue(deps[i], fieldtype(S, i)), Val(fieldcount(S)))
+    causalvar.value[] = Known{T}(convert(T, causalvar.resolver(values...)))
+    return causalvar
+end
+getvalue(causalvar::AbstractCausalVariable, ::Type{T}) where {T} = @cases (causalvar.value::Base.RefValue{Possible{T}})[] begin
+    Unknown => getvalue(causalvar) # throws
+    Known(x) => x
 end
 resolve!(causalvar::Tuple{AbstractCausalVariable}) = resolve!(causalvar[1])
 resolve!(causalvar::NTuple{N,AbstractCausalVariable}) where N = resolve!.(causalvar)

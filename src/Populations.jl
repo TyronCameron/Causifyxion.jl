@@ -12,15 +12,15 @@ sampling-pool detail, not causal dependencies, so `Taproots.children` returns `(
 mutable struct Population{T} <: AbstractCausalVariable
     replicas::Vector{<:AbstractCausalVariable}
     n::Int
-    value::Possible{Vector{T}}
+    value::Base.RefValue{Possible{Vector{T}}}
 end
 
 Taproots.children(::Population) = ()
 Taproots.setchildren!(population::Population, _) = population
-Base.copy(p::Population{T}) where T = Population{T}(copy(p.replicas), p.n, p.value)
+Base.copy(p::Population{T}) where T = Population{T}(copy(p.replicas), p.n, Ref(p.value[]))
 Base.eltype(::Population{T}) where T = Vector{T}
 function Base.show(io::IO, population::Population{T}) where T
-    state = @cases population.value begin
+    state = @cases population.value[] begin
         Unknown => "Population($(population.n) × Unknown::$(T))"
         Known(x) => "Population($(population.n) × Known::$(T))"
     end
@@ -47,7 +47,7 @@ function population(n::Int, causalvar::AbstractCausalVariable; k::Int = Threads.
     k >= 1 || throw(ArgumentError("k must be at least 1, got $k"))
     T = eltype(causalvar)
     replicas = AbstractCausalVariable[replicate(causalvar) for _ in 1:k]
-    return Population{T}(replicas, n, Unknown)
+    return Population{T}(replicas, n, Ref{Possible{Vector{T}}}(Unknown))
 end
 
 """
