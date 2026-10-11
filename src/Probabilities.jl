@@ -59,6 +59,8 @@ total(tally::Tally) = sum(tally.counts)
 # Empirical Probability Mass
 # ---------------------------------------------------------------------------
 using Random: AbstractRNG
+using Distributions: DiscreteNonParametric
+import Distributions: cdf, pdf, logpdf, quantile, support, probs, insupport
 
 const MultivariateValue = Union{Tuple, AbstractVector}
 
@@ -118,7 +120,7 @@ Base.minimum(distr::EmpiricalDistribution) = first(support(distr))
 Base.maximum(distr::EmpiricalDistribution) = last(support(distr))
 support(distr::EmpiricalDistribution) = distr.values
 probs(distr::EmpiricalDistribution) = diff([0.0; distr.cumulative_probabilities])
-tally(distr::EmpiricalDistribution) = Tally(distr.values, probs(distr) .* distr.total)
+tally(distr::EmpiricalDistribution) = Tally(distr.values, round.(Int, probs(distr) .* distr.total))
 insupport(distr::EmpiricalDistribution, s) = mass(distr, s) > 0
 
 (distr::EmpiricalDistribution)(s) = cdf(distr, s)

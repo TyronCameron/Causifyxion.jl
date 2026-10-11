@@ -17,7 +17,9 @@ export CausalVariable,
     causify, @causify, given,
     isexclusive, isexhaustive, isbasis,
     degree,
-    replicate, Population, population
+    replicate, Population, population,
+    Tally, tally, total, EmpiricalDistribution, distribution,
+    cdf, mass, pdf, logpdf, support, probs, insupport, quantile, copula
 
 abstract type AbstractCausalVariable end 
 
@@ -34,9 +36,12 @@ end
 """
     ValueUnknownError
 
-You tried to get the value of a CausalVariable that has not yet been sampled. 
+You tried to get the value of a CausalVariable that has not yet been sampled.
 """
-struct ValueUnknownError <: Exception end 
+struct ValueUnknownError <: Exception
+    msg::String
+end
+Base.showerror(io::IO, e::ValueUnknownError) = print(io, e.msg)
 
 """
     CausalVariable{T}
@@ -118,7 +123,7 @@ causify(resolver, dependencies::AbstractCausalVariable...) = causify(resolver, d
 Returns the value that is wrapped within the causalvar.
 """
 getvalue(causalvar::AbstractCausalVariable) = @cases causalvar.value begin 
-    Unknown => error(ValueUnknownError, "Can't get the value of an unknown value! Perhaps call resolve!(your_variable) first. The variable you attempted to get the value of was $causalvar")
+    Unknown => throw(ValueUnknownError("Can't get the value of an unknown value! Perhaps call resolve!(your_variable) first. The variable you attempted to get the value of was $causalvar"))
     Known(x) => x
 end
 
@@ -200,9 +205,12 @@ isnothingknown(causalvar::AbstractCausalVariable...) = isnothingknown(causalvar)
 """
     ValueAlreadyKnownError
 
-You cannot simulate a CausalVariable if some parts of it are already known. 
+You cannot simulate a CausalVariable if some parts of it are already known.
 """
-struct ValueAlreadyKnownError <: Exception end 
+struct ValueAlreadyKnownError <: Exception
+    msg::String
+end
+Base.showerror(io::IO, e::ValueAlreadyKnownError) = print(io, e.msg)
 
 """
     resolve!(causalvariables...)
@@ -353,7 +361,7 @@ If you encounter errors, try calling `refresh!` before running this.
 """
 function simulate(intervention_function!, causalvar::NTuple{N,AbstractCausalVariable}) where N
     if isanyknown(causalvar)
-        error(ValueAlreadyKnownError, "You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvar")
+        throw(ValueAlreadyKnownError("You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvar"))
     end
     intervention_function!()
     values = resolve!(causalvar)
@@ -366,7 +374,7 @@ simulate(causalvar::AbstractCausalVariable...) = simulate(causalvar)
 
 function simulate(intervention_function!, n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N
     if isanyknown(causalvar)
-        error(ValueAlreadyKnownError, "You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvar")
+        throw(ValueAlreadyKnownError("You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvar"))
     end
     result = simulate!(intervention_function!, n, causalvar)
     refresh!(causalvar)
@@ -475,6 +483,9 @@ include(joinpath(@__DIR__, "CausifyMacro.jl"))
 
 # Include Population (n i.i.d. replicas of a CausalVariable)
 include(joinpath(@__DIR__, "Populations.jl"))
+
+# Include empirical probability/distribution tooling (Tally, EmpiricalDistribution, copula, ...)
+include(joinpath(@__DIR__, "Probabilities.jl"))
 
 end  # module Causifyxion
 

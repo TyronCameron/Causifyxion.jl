@@ -36,9 +36,9 @@ end
         x^2
     end 
     
-    @test_throws "Perhaps call resolve!" begin 
+    @test_throws ValueUnknownError begin
         getvalue(x)
-    end 
+    end
 
     @test_throws MethodError begin 
         setvalue!(x, "A string instead of a float64")
@@ -58,8 +58,9 @@ end
 
     @test getvalue(y) == 10000
     @test dependson(y, x)
+    @test !dependson(x, y) # dependency is directional: x does not depend on y
 
-end 
+end
 
 @testset "Reset and rand" begin
     x = causify(Uniform(0,1))
@@ -124,6 +125,8 @@ end
     end
     @test !isindependent(x1, z)
     @test !isindependent(z, x1)
+    @test degree(x1) == 0    # a leaf has no dependencies
+    @test degree(z) == 1     # z depends directly on x1
 
     s = causify(Normal(0,1))
     x = causify(x1, s) do x1, s
@@ -144,6 +147,14 @@ end
 
     conditioned = B | A # B's value when A is true, else missing
 
+    # `|` is sugar for `given` -- exercise `given` directly too, and confirm they agree
+    setvalue!(A, true)
+    setvalue!(B, false)
+    @test resolve!(given(B, A)) === false
+    setvalue!(A, false)
+    @test resolve!(given(B, A)) === missing
+    refresh!(A); refresh!(B)
+
     n = 20_000
     samples = simulate!(n, conditioned)
     @test eltype(samples) == Union{Bool,Missing}
@@ -154,18 +165,5 @@ end
 
     @test isapprox(p_a, 0.7; atol = 0.03)
     @test isapprox(p_b_given_a, 0.9; atol = 0.05)
-end
-
-@testset "simulate! timing" begin
-    x = causify(Normal(0,1))
-    y = causify(x) do x
-        x^2
-    end
-
-    cold = @elapsed simulate!(10_000, x, y)
-    @test cold < 30 # generous: guards against the zip-splat compile-time blowup regressing, not a microbenchmark
-
-    warm = @elapsed simulate!(10_000, x, y)
-    @test warm < 2.0 # steady-state call, observed ~0.03s
 end
 

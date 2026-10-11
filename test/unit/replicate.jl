@@ -7,7 +7,7 @@
         z = replicate(y)
         @test z isa CausalVariable
         @test z !== y
-        @test z.dependencies[1] !== x
+        @test isindependent(z, x) # replicate gives z its own fresh copy of x, not the original
 
         setvalue!(x, 0.5)
         resolve!(y)
@@ -23,7 +23,6 @@
         y = @causify x^2
 
         z = replicate(y, x)
-        @test z.dependencies[1] === x
 
         setvalue!(x, 0.3)
         @test resolve!(z) == 0.09
@@ -42,8 +41,9 @@
         z_vararg = replicate(y, x)
         z_tuple = replicate(y, (x,))
 
-        @test z_vararg.dependencies[1] === x
-        @test z_tuple.dependencies[1] === x
+        setvalue!(x, 0.7)
+        @test resolve!(z_vararg) ≈ 0.49 # both forms share the same kept ancestor x
+        @test resolve!(z_tuple) ≈ 0.49
     end
 end
 
@@ -62,7 +62,6 @@ end
 
     @testset "with keep: shared ancestor across all replicas" begin
         zs = replicate(3, y, x)
-        @test all(z -> z.dependencies[1] === x, zs)
 
         setvalue!(x, 0.4)
         @test all(z -> resolve!(z) ≈ 0.16, zs)
@@ -71,7 +70,9 @@ end
     @testset "vararg / tuple keep parity" begin
         zs_vararg = replicate(2, y, x)
         zs_tuple = replicate(2, y, (x,))
-        @test all(z -> z.dependencies[1] === x, zs_vararg)
-        @test all(z -> z.dependencies[1] === x, zs_tuple)
+
+        setvalue!(x, 0.6)
+        @test all(z -> resolve!(z) ≈ 0.36, zs_vararg) # both forms share the same kept ancestor x
+        @test all(z -> resolve!(z) ≈ 0.36, zs_tuple)
     end
 end

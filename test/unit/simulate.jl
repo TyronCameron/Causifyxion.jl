@@ -64,7 +64,7 @@
         @test setunknown!(x) === x # returns the causal variable itself, same contract as setvalue!
         @test isunknown(x)
 
-        @test_throws "Perhaps call resolve!" getvalue(x)
+        @test_throws ValueUnknownError getvalue(x)
 
         # non-recursive: unlike refresh!, setunknown! doesn't touch dependencies
         p = causify(() -> 2.0)

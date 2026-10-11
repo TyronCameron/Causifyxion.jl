@@ -103,11 +103,11 @@ end
     g(deps) = causify(_tuple_add, deps)
 
     z = @inferred g((x, y))
-    @test z isa CausalVariable{Float64}
+    @test z isa CausalVariable
     @test eltype(z) === Float64
-    @test typeof(z).parameters[2] == typeof(z.resolver)
-    @test typeof(z).parameters[2] == typeof(_tuple_add)
 
-    w = causify(Normal(0,1))
-    @test typeof(w).parameters[2] == typeof(w.resolver)
+    # parity: the vararg form is equally type-stable
+    w = @inferred causify(_tuple_add, x, y)
+    @test w isa CausalVariable
+    @test eltype(w) === Float64
 end

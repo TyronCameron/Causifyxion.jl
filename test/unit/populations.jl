@@ -5,11 +5,10 @@
 
         pop = population(100, x)
         @test pop isa Population{Float64}
-        @test pop.n == 100
-        @test length(pop.replicas) == Threads.nthreads()
+        @test length(resolve!(pop)) == 100
 
         pop_k = population(100, x; k = 3)
-        @test length(pop_k.replicas) == 3
+        @test length(resolve!(pop_k)) == 100 # k is just an internal parallelism knob, output size is unaffected
 
         @test_throws ArgumentError population(-1, x)
         @test_throws ArgumentError population(10, x; k = 0)
@@ -19,8 +18,7 @@
         x = causify(Normal(0,1))
         pop = population(10, x)
 
-        @test Causifyxion.Taproots.children(pop) == ()
-        @test Causifyxion.degree(pop) == 0
+        @test degree(pop) == 0
     end
 
     @testset "initially unknown" begin

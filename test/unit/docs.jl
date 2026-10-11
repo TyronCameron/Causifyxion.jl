@@ -11,7 +11,7 @@ using Dates
         @test x isa CausalVariable
         @test eltype(x) <: String
 
-        @test_throws "Perhaps call resolve!" getvalue(x)
+        @test_throws ValueUnknownError getvalue(x)
 
         underlying_value = resolve!(x) # returns either "Yes" or "No"
         @test getvalue(x) === underlying_value
@@ -62,7 +62,7 @@ using Dates
         setunknown!(causalvar)
         @test isunknown(causalvar)
 
-        @test_throws "Perhaps call resolve!" getvalue(causalvar)
+        @test_throws ValueUnknownError getvalue(causalvar)
     end
 
     @testset "Creating Causal Variables" begin
@@ -102,9 +102,9 @@ using Dates
 
         @test const1 == 15
         @test const2 == 25
-        @test causalconst isa CausalVariable{Int}
-        @test causal isa CausalVariable{Int}
-        @test causalcomplex isa CausalVariable{Int}
+        @test causalconst isa CausalVariable && eltype(causalconst) === Int
+        @test causal isa CausalVariable && eltype(causal) === Int
+        @test causalcomplex isa CausalVariable && eltype(causalcomplex) === Int
 
         resolve!(causalcomplex)
 
@@ -131,7 +131,7 @@ using Dates
         @test isknown(ϵ) # but the values which did not depend on x are left alone
 
         # either z or a dependency of z is known (ϵ is), so this sample would not be fresh
-        @test_throws "You cannot call" simulate(z)
+        @test_throws ValueAlreadyKnownError simulate(z)
 
         simulate!(z) # will run in all circumstances
         simulate!(z) # a totally fresh, different answer

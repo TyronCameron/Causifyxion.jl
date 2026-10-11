@@ -123,7 +123,7 @@ end
 @testset "Type inference" begin
     x = causify(Normal(0,1))
     g(x) = @causify x + 1.0
-    @test @inferred(g(x)) isa CausalVariable{Float64}
+    @test (@inferred g(x)) isa CausalVariable
     @test eltype(g(x)) === Float64
     h(a, b) = @causify a + b # no-causals path collapses to plain evaluation
     @test @inferred(h(1.0, 2)) === 3.0
@@ -134,12 +134,11 @@ end
     # still recognize it as a real dependency rather than an inert captured constant.
     x = causify(() -> 1.0)
     pop = population(5, x)
-    resolve!(pop) # Population must be known before use as a dependency: resolve!'s generic
-                   # DAG walk assumes `.dependencies`/`.resolver` fields, which only CausalVariable has.
+    resolve!(pop) # Population must already be known before being used as a dependency here
 
     z = @causify sum(pop)
 
     @test z isa CausalVariable
-    @test pop in z.dependencies # captured as a real dependency, not evaluated eagerly as a constant
+    @test dependson(z, pop) # captured as a real dependency, not evaluated eagerly as a constant
     @test resolve!(z) == 5.0    # 5 draws of a constant-1.0 resolver, summed
 end
