@@ -68,7 +68,7 @@ This enables you to:
 mutable struct CausalVariable{T,F,S<:Tuple} <: AbstractCausalVariable
     value::Base.RefValue{Possible{T}}
     resolver::F
-    dependencies::Vector{AbstractCausalVariable} # S holds the eltypes of the dependencies
+    dependencies::Vector{AbstractCausalVariable}
 end
 Taproots.children(causalvar::AbstractCausalVariable) = causalvar.dependencies
 Base.copy(cv::CausalVariable{T,F,S}) where {T,F,S} = CausalVariable{T,F,S}(Ref(cv.value[]), cv.resolver, copy(cv.dependencies))
@@ -232,21 +232,20 @@ second_sample = resolve!(x)
 """
 function resolve!(causalvar::AbstractCausalVariable)
     if isknown(causalvar) return getvalue(causalvar) end
-    for child in postorder(causalvar; connector = (parent, child) -> isunknown(child))
-        resolvenode!(child)
+    for node in postorder(causalvar; connector = (parent, child) -> isunknown(child))
+        _resolve_single_node!(node)
     end 
     return getvalue(causalvar)
 end
 
-# Function barrier: the dependency eltypes `S` let each dependency's value be read with a concrete type
-function resolvenode!(causalvar::CausalVariable{T,F,S}) where {T,F,S}
+function _resolve_single_node!(causalvar::CausalVariable{T,F,S}) where {T,F,S}
     deps = causalvar.dependencies
     values = ntuple(i -> getvalue(deps[i], fieldtype(S, i)), Val(fieldcount(S)))
     causalvar.value[] = Known{T}(convert(T, causalvar.resolver(values...)))
     return causalvar
 end
 getvalue(causalvar::AbstractCausalVariable, ::Type{T}) where {T} = @cases (causalvar.value::Base.RefValue{Possible{T}})[] begin
-    Unknown => getvalue(causalvar) # throws
+    Unknown => getvalue(causalvar)
     Known(x) => x
 end
 resolve!(causalvar::Tuple{AbstractCausalVariable}) = resolve!(causalvar[1])
