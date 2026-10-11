@@ -128,3 +128,18 @@ end
     h(a, b) = @causify a + b # no-causals path collapses to plain evaluation
     @test @inferred(h(1.0, 2)) === 3.0
 end
+
+@testset "Dependency detection for AbstractCausalVariable subtypes" begin
+    # Population is an AbstractCausalVariable but not a CausalVariable -- @causify must
+    # still recognize it as a real dependency rather than an inert captured constant.
+    x = causify(() -> 1.0)
+    pop = population(5, x)
+    resolve!(pop) # Population must be known before use as a dependency: resolve!'s generic
+                   # DAG walk assumes `.dependencies`/`.resolver` fields, which only CausalVariable has.
+
+    z = @causify sum(pop)
+
+    @test z isa CausalVariable
+    @test pop in z.dependencies # captured as a real dependency, not evaluated eagerly as a constant
+    @test resolve!(z) == 5.0    # 5 draws of a constant-1.0 resolver, summed
+end

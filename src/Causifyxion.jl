@@ -388,7 +388,7 @@ function invalidate!(parent::AbstractCausalVariable, child::AbstractCausalVariab
             setunknown!(pluck(parent, t))
         end 
     end 
-    return parent
+    return setunknown!(parent)
 end
 
 """
