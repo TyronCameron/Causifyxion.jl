@@ -70,7 +70,8 @@ mutable struct CausalVariable{T,F,S<:Tuple} <: AbstractCausalVariable
     resolver::F
     dependencies::Vector{AbstractCausalVariable}
 end
-Taproots.children(causalvar::AbstractCausalVariable) = causalvar.dependencies
+Taproots.children(causalvar::AbstractCausalVariable) = causalvar.dependencies::Vector{AbstractCausalVariable}
+Taproots.childtype(::Type{<:AbstractCausalVariable}) = AbstractCausalVariable
 Base.copy(cv::CausalVariable{T,F,S}) where {T,F,S} = CausalVariable{T,F,S}(Ref(cv.value[]), cv.resolver, copy(cv.dependencies))
 Taproots.setchildren!(causalvar::AbstractCausalVariable, children) = (causalvar.dependencies = children; causalvar)
 Base.eltype(::CausalVariable{T}) where {T} = T
