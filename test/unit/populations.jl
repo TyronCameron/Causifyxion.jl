@@ -18,7 +18,7 @@
         x = causify(Normal(0,1))
         pop = population(10, x)
 
-        @test degree(pop) == 0
+        @test Causifyxion.degree(pop) == 0
     end
 
     @testset "initially unknown" begin

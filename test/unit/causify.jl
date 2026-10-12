@@ -125,8 +125,8 @@ end
     end
     @test !isindependent(x1, z)
     @test !isindependent(z, x1)
-    @test degree(x1) == 0    # a leaf has no dependencies
-    @test degree(z) == 1     # z depends directly on x1
+    @test Causifyxion.degree(x1) == 0    # a leaf has no dependencies
+    @test Causifyxion.degree(z) == 1     # z depends directly on x1
 
     s = causify(Normal(0,1))
     x = causify(x1, s) do x1, s

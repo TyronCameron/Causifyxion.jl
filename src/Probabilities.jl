@@ -1,3 +1,7 @@
+using Random: AbstractRNG
+using Distributions: DiscreteNonParametric
+import Distributions: cdf, pdf, logpdf, quantile, support, probs, insupport
+
 # ---------------------------------------------------------------------------
 # Tally
 # ---------------------------------------------------------------------------
@@ -58,9 +62,6 @@ total(tally::Tally) = sum(tally.counts)
 # ---------------------------------------------------------------------------
 # Empirical Probability Mass
 # ---------------------------------------------------------------------------
-using Random: AbstractRNG
-using Distributions: DiscreteNonParametric
-import Distributions: cdf, pdf, logpdf, quantile, support, probs, insupport
 
 const MultivariateValue = Union{Tuple, AbstractVector}
 

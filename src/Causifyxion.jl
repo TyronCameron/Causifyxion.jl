@@ -16,10 +16,10 @@ export CausalVariable,
     resolve!, refresh!, simulate!, simulate, invalidate!,
     causify, @causify, given,
     isexclusive, isexhaustive, isbasis,
-    degree,
-    replicate, Population, population,
-    Tally, tally, total, EmpiricalDistribution, distribution,
-    cdf, mass, pdf, logpdf, support, probs, insupport, quantile, copula
+    # degree,
+    replicate, Population, population
+    # Tally, tally, total, EmpiricalDistribution, distribution,
+    # cdf, mass, pdf, logpdf, support, probs, insupport, quantile, copula
 
 abstract type AbstractCausalVariable end 
 
@@ -488,14 +488,9 @@ This extends the doman of `x` into Union{T, Missing}, and enables rejection samp
 given(x::CausalVariable, y::CausalVariable{<:Union{Bool, Missing}}) = causify((x,y) -> y === true ? x : missing, x, y)
 Base.:|(x::CausalVariable, y::CausalVariable{<:Union{Bool, Missing}}) = given(x, y)
 
-# Include the @causify macro
 include(joinpath(@__DIR__, "CausifyMacro.jl"))
-
-# Include Population (n i.i.d. replicas of a CausalVariable)
 include(joinpath(@__DIR__, "Populations.jl"))
-
-# Include empirical probability/distribution tooling (Tally, EmpiricalDistribution, copula, ...)
-include(joinpath(@__DIR__, "Probabilities.jl"))
+# include(joinpath(@__DIR__, "Probabilities.jl"))
 
 end  # module Causifyxion
 
