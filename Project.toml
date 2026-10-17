@@ -1,6 +1,6 @@
 name = "Causifyxion"
 uuid = "c7c60c5c-2ec4-4fbb-884a-28bd8a4a87ad"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["TyronCameron <tyron.luke.cameron@gmail.com>"]
 
 [deps]
@@ -12,4 +12,4 @@ Taproots = "6cca9763-2e92-47b9-bf40-ccfe60418944"
 julia = "1.10"
 Distributions = "^0.25.123"
 SumTypes = "^0.5.8"
-Taproots = "^0.3.0"
+Taproots = "0.4 - 0"
