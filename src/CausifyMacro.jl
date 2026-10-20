@@ -5,14 +5,14 @@
 # Select the CausalVariables out of a tuple
 @inline _causals(t::Tuple{}) = ()
 @inline _causals(t::Tuple) = _causals_first(first(t), Base.tail(t))
-@inline _causals_first(x::AbstractCausalVariable, rest) = (x, _causals(rest)...)
-@inline _causals_first(::Any, rest) = _causals(rest)
+@inline _causals_first(x::AbstractCausalVariable, rest::Tuple) = (x, _causals(rest)...)
+@inline _causals_first(::Any, rest::Tuple) = _causals(rest)
 
 # Rebuild `deps`, replacing each CausalVariable with the next resolved value from `args`
 @inline _merge_args(::Tuple{}, ::Tuple{}) = ()
 @inline _merge_args(deps::Tuple, args::Tuple) = _merge_first(first(deps), Base.tail(deps), args)
-@inline _merge_first(::AbstractCausalVariable, rest, args) = (first(args), _merge_args(rest, Base.tail(args))...)
-@inline _merge_first(d, rest, args) = (d, _merge_args(rest, args)...)
+@inline _merge_first(::AbstractCausalVariable, rest::Tuple, args::Tuple) = (first(args), _merge_args(rest, Base.tail(args))...)
+@inline _merge_first(d, rest::Tuple, args::Tuple) = (d, _merge_args(rest, args)...)
 
 _causify_impl(f::F, deps::Tuple, ::Tuple{}) where {F<:Function} = f(deps...)
 _causify_impl(f::F, deps::Tuple, causals::Tuple) where {F<:Function} =
