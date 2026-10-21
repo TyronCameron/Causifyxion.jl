@@ -1,12 +1,8 @@
-# Runs ReLint over the given folders and fails on any violation.
-# ReLint ships RelationalAI's house rules too (`tin`, `thaskey`, `@safe` logging, Jira TODOs, ...),
-# so only the rules that make sense outside RAI are enforced. Recommendations are printed but never fail.
-# Silence a single line with `# lint-disable-next-line: <rule description>`.
 using ReLint: ReLint
 
 const ENFORCED = [
-    "show",                          # stray `@show`
-    "bare using",                    # `using Foo: names` rather than `using Foo`
+    "show",
+    "bare using",
     "non-const untyped global",
     "unreachable branch",
     "static threads",

@@ -51,7 +51,6 @@ jobs:
           arch: x64
       - uses: julia-actions/cache@v2
       - name: Install ReLint
-        # ReLint is not in the General registry, so it is pinned to a commit
         run: julia --project=@relint -e 'using Pkg; Pkg.add(url="https://github.com/RelationalAI-oss/ReLint.jl", rev="61079427d9fc91cb3ead8f5b287aa3ae9b2269cb")'
       - name: Run ReLint
         run: julia --project=@relint .github/lint/relint.jl src
