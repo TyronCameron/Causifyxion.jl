@@ -10,6 +10,7 @@ include(joinpath(@__DIR__, "unit", "basis.jl"))
 include(joinpath(@__DIR__, "unit", "populations.jl"))
 # include(joinpath(@__DIR__, "unit", "probabilities.jl"))
 include(joinpath(@__DIR__, "unit", "simulate.jl"))
+include(joinpath(@__DIR__, "unit", "threaded.jl"))
 include(joinpath(@__DIR__, "unit", "docs.jl"))
 
 # Set project extras to false. It is erroring due to using Distributions: Distribution

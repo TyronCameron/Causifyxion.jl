@@ -6,10 +6,12 @@ using PrettyTables
 using Profile
 using JET
 
-implementations::Tuple = (:naive, :causifyxion)
+implementations::Tuple = (:naive, :causifyxion, :threaded)
 situations::Tuple = (
     :deep_pipeline,
     :branching_pipeline,
+    :expensive_wide,
+    :expensive_chain,
 )
 
 module InitFunctions
@@ -36,6 +38,14 @@ module CausifyxionFunctions
 end
 import .CausifyxionFunctions
 
+module ThreadedFunctions
+    using Causifyxion
+    for file in readdir(joinpath(@__DIR__, "threaded"), join = true)
+        include(file)
+    end
+end
+import .ThreadedFunctions
+
 function get_func(implementation, situation)
     if implementation == :init
         @eval InitFunctions.$situation
@@ -43,6 +53,8 @@ function get_func(implementation, situation)
         @eval NaiveFunctions.$situation
     elseif implementation == :causifyxion
         @eval CausifyxionFunctions.$situation
+    elseif implementation == :threaded
+        @eval ThreadedFunctions.$situation
     else
         @assert false "No known functions for $implementation"
     end
@@ -111,12 +123,11 @@ results_to_table(results) = reduce(implementations, init = DataFrame()) do acc, 
 end
 
 function unpivot_table(df)
-    df = select(innerjoin(
-        df[df.implementation .== :naive, :],
-        df[df.implementation .== :causifyxion, :],
-        on = :benchmark,
-        renamecols = "_naive" => "_causifyxion"
-    ), Not(r".*implem.*"))
+    wide = map(implementations) do implementation
+        part = select(df[df.implementation .== implementation, :], Not(:implementation))
+        rename(name -> name == "benchmark" ? name : "$(name)_$(implementation)", part)
+    end
+    df = innerjoin(wide...; on = :benchmark)
     order = Dict(s => i for (i, s) in enumerate(situations))
     sort!(df, by = x -> get(order, x, Inf))
 end

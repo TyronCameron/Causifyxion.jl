@@ -389,6 +389,26 @@ fresh_samples = simulate!(pop)    # refresh! + resolve!, in one call
 `k` only buys real parallelism if Julia itself is started with multiple threads
 (`julia -t auto`); pass it explicitly with `population(n, x; k = 8)` to control it directly.
 
+## Multithreaded resolution with `Threaded()`
+
+`Population` parallelises *across* samples. When a single sample is expensive -- resolvers that each take
+tens of microseconds or more -- and the graph is wide, you can instead parallelise *within* one sample by
+passing the `Threaded()` strategy as the first argument:
+
+```julia
+value = resolve!(Threaded(), z)
+xs, zs = simulate!(Threaded(), 100, x, z)
+```
+
+Each unknown node starts as soon as its last unknown dependency resolves, so a slow branch only holds up its
+own dependents. The default, `Serial()`, is faster whenever resolvers are cheap or the graph is mostly one
+chain, because scheduling costs a few microseconds per node plus a small fixed cost per call. As a rule of
+thumb, reach for `Threaded()` when resolvers average 10 µs or more *and* at least two branches can run side by
+side. Resolvers must be safe to call concurrently.
+
+There is no benefit in combining the two: a `Population` already keeps every thread busy, so it always
+resolves its replicas serially.
+
 ## Useful features of sampling-first
 
 Sampling is a simple procedure, and by expressing our variables through sampling mechanisms, capturing their causal dependencies, we arrive at a very natural way to model the real world. We can describe plain and simple relationships between variables.

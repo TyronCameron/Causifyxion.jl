@@ -54,7 +54,8 @@ end
     resolve!(population::Population)
 
 Draws `n` fresh, independent samples of the wrapped causal variable, distributing the work
-across the population's replicas via `Threads.@spawn`. If the population is already known,
+across the population's replicas via `Threads.@spawn`. Each replica resolves serially: the replicas already
+keep every thread busy, so resolving them with `Threaded()` would only add scheduling overhead. If the population is already known,
 returns the cached result instead of resampling.
 """
 function resolve!(population::Population{T}) where T
@@ -81,3 +82,4 @@ function resolve!(population::Population{T}) where T
     setvalue!(population, results)
     return results
 end
+_resolve_single_node!(population::Population) = (resolve!(population); population)

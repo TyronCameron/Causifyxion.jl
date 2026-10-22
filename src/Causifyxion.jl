@@ -14,6 +14,7 @@ export CausalVariable,
     isanyknown, isnothingknown, dependson, isindependent,
     ValueAlreadyKnownError,
     resolve!, refresh!, simulate!, simulate, invalidate!,
+    ResolveStrategy, Serial, Threaded,
     causify, @causify, given,
     isexclusive, isexhaustive, isbasis,
     # degree,
@@ -214,6 +215,33 @@ end
 Base.showerror(io::IO, e::ValueAlreadyKnownError) = print(io, e.msg)
 
 """
+    ResolveStrategy
+
+How `resolve!` (and `simulate!` / `simulate`) walk the dependency graph. Pass one as the first argument, e.g. `resolve!(Threaded(), x)`.
+Options are `Serial()` (the default) and `Threaded()`.
+"""
+abstract type ResolveStrategy end
+
+"""
+    Serial()
+
+The default `ResolveStrategy`: resolves every unknown node one after another on the calling task.
+"""
+struct Serial <: ResolveStrategy end
+
+"""
+    Threaded()
+
+A `ResolveStrategy` that resolves independent nodes concurrently with `Threads.@spawn`.
+A node is spawned as soon as its last unknown dependency resolves, so a slow branch only holds up its own dependents.
+
+Worth it when resolvers are expensive (tens of microseconds or more each) and the graph is wide; for cheap resolvers or
+chain-like graphs the scheduling overhead makes it slower than `Serial()`. Falls back to `Serial()` when Julia runs on one thread.
+Resolvers must be safe to call concurrently (no unsynchronised shared mutable state).
+"""
+struct Threaded <: ResolveStrategy end
+
+"""
     resolve!(causalvariables...)
 
 Samples each of the `causalvariables` supplied and returns the value of those answers. 
@@ -233,9 +261,12 @@ second_sample = resolve!(x)
 """
 function resolve!(causalvar::AbstractCausalVariable)
     if isknown(causalvar) return getvalue(causalvar) end
-    for node in postorder(causalvar; connector = (parent, child) -> isunknown(child))
+    # AllPaths skips the visited-set bookkeeping; the connector is checked lazily, so known nodes prune the walk.
+    # A node shared by two siblings can still be reached twice before it resolves, hence the isknown check.
+    for node in postorder(causalvar; pathset = AllPaths, connector = (parent, child) -> isunknown(child))
+        isknown(node) && continue
         _resolve_single_node!(node)
-    end 
+    end
     return getvalue(causalvar)
 end
 
@@ -252,6 +283,8 @@ end
 resolve!(causalvar::Tuple{AbstractCausalVariable}) = resolve!(causalvar[1])
 resolve!(causalvar::NTuple{N,AbstractCausalVariable}) where N = resolve!.(causalvar)
 resolve!(causalvar::AbstractCausalVariable...) = resolve!(causalvar)
+resolve!(::Serial, causalvar::NTuple{N,AbstractCausalVariable}) where N = resolve!(causalvar)
+resolve!(::Serial, causalvar::AbstractCausalVariable...) = resolve!(causalvar)
 
 """
     refresh!(causalvar::CausalVariable...)
@@ -288,10 +321,12 @@ refresh!(causalvar::NTuple{N,AbstractCausalVariable}) where N = refresh!.(causal
 refresh!(causalvar::AbstractCausalVariable...) = refresh!(causalvar)
 
 """
-    simulate!([intervention_function::Function, n::Int, ]causalvar::CausalVariable...)
+    simulate!([strategy::ResolveStrategy, ][intervention_function::Function, n::Int, ]causalvar::CausalVariable...)
 
 Get an absolutely fresh sample of your variables. This will refresh! this and all sub-variables.
 You can call this is repeatedly by supplying `n`. Handy for data. 
+Pass `Threaded()` as the first argument (`simulate!(Threaded(), x, y)`, or `simulate!(Threaded(), x, y) do ... end`)
+to resolve each sample with `resolve!(Threaded(), ...)`; the default is `Serial()`.
 
 Warning! This leaves your variables in a known state. 
 
@@ -334,20 +369,20 @@ using DataFrames
 df = DataFrame(collect(rigged_tuple), [:x, :y])
 ```
 """
-function simulate!(intervention_function!, causalvar::NTuple{N,AbstractCausalVariable}) where N
+function simulate!(strategy::ResolveStrategy, intervention_function!, causalvar::NTuple{N,AbstractCausalVariable}) where N
     refresh!(causalvar)
     intervention_function!()
-    return resolve!(causalvar)
+    return resolve!(strategy, causalvar)
 end
-simulate!(intervention_function!, causalvar::AbstractCausalVariable...) = simulate!(intervention_function!, causalvar)
-simulate!(causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate!(() -> (), causalvar)
-simulate!(causalvar::AbstractCausalVariable...) = simulate!(causalvar)
+simulate!(strategy::ResolveStrategy, intervention_function!, causalvar::AbstractCausalVariable...) = simulate!(strategy, intervention_function!, causalvar)
+simulate!(strategy::ResolveStrategy, causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate!(strategy, () -> (), causalvar)
+simulate!(strategy::ResolveStrategy, causalvar::AbstractCausalVariable...) = simulate!(strategy, causalvar)
 
-function simulate!(intervention_function!, n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N
+function simulate!(strategy::ResolveStrategy, intervention_function!, n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N
     k = length(causalvar)
     columns = ntuple(j -> Vector{eltype(causalvar[j])}(undef, n), k)
     for i in 1:n
-        row = simulate!(intervention_function!, causalvar)
+        row = simulate!(strategy, intervention_function!, causalvar)
         if k == 1
             columns[1][i] = row
         else
@@ -358,42 +393,62 @@ function simulate!(intervention_function!, n::Int, causalvar::NTuple{N,AbstractC
     end
     return k == 1 ? columns[1] : columns
 end
-simulate!(intervention_function!, n::Int, causalvar::AbstractCausalVariable...) = simulate!(intervention_function!, n, causalvar)
-simulate!(n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate!(() -> (), n, causalvar)
-simulate!(n::Int, causalvar::AbstractCausalVariable...) = simulate!(n, causalvar)
+simulate!(strategy::ResolveStrategy, intervention_function!, n::Int, causalvar::AbstractCausalVariable...) = simulate!(strategy, intervention_function!, n, causalvar)
+simulate!(strategy::ResolveStrategy, n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate!(strategy, () -> (), n, causalvar)
+simulate!(strategy::ResolveStrategy, n::Int, causalvar::AbstractCausalVariable...) = simulate!(strategy, n, causalvar)
+simulate!(intervention_function!::Function, strategy::ResolveStrategy, args...) = simulate!(strategy, intervention_function!, args...) # do-block form
+
+simulate!(intervention_function!, causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate!(Serial(), intervention_function!, causalvar)
+simulate!(intervention_function!, causalvar::AbstractCausalVariable...) = simulate!(Serial(), intervention_function!, causalvar)
+simulate!(causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate!(Serial(), causalvar)
+simulate!(causalvar::AbstractCausalVariable...) = simulate!(Serial(), causalvar)
+simulate!(intervention_function!, n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate!(Serial(), intervention_function!, n, causalvar)
+simulate!(intervention_function!, n::Int, causalvar::AbstractCausalVariable...) = simulate!(Serial(), intervention_function!, n, causalvar)
+simulate!(n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate!(Serial(), n, causalvar)
+simulate!(n::Int, causalvar::AbstractCausalVariable...) = simulate!(Serial(), n, causalvar)
 
 """
-    simulate([intervention_function::Function, n::Int, ]causalvar::CausalVariable...)
+    simulate([strategy::ResolveStrategy, ][intervention_function::Function, n::Int, ]causalvar::CausalVariable...)
 
 Same as `simulate!` but will first check if your variables are known. If already known, it will error. 
 This starts and leaves your variables in an unknown state. 
 
 If you encounter errors, try calling `refresh!` before running this. 
 """
-function simulate(intervention_function!, causalvar::NTuple{N,AbstractCausalVariable}) where N
+function simulate(strategy::ResolveStrategy, intervention_function!, causalvar::NTuple{N,AbstractCausalVariable}) where N
     if isanyknown(causalvar)
         throw(ValueAlreadyKnownError("You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvar"))
     end
     intervention_function!()
-    values = resolve!(causalvar)
+    values = resolve!(strategy, causalvar)
     refresh!(causalvar)
     return values
 end
-simulate(intervention_function!, causalvar::AbstractCausalVariable...) = simulate(intervention_function!, causalvar)
-simulate(causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate(() -> (), causalvar)
-simulate(causalvar::AbstractCausalVariable...) = simulate(causalvar)
+simulate(strategy::ResolveStrategy, intervention_function!, causalvar::AbstractCausalVariable...) = simulate(strategy, intervention_function!, causalvar)
+simulate(strategy::ResolveStrategy, causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate(strategy, () -> (), causalvar)
+simulate(strategy::ResolveStrategy, causalvar::AbstractCausalVariable...) = simulate(strategy, causalvar)
 
-function simulate(intervention_function!, n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N
+function simulate(strategy::ResolveStrategy, intervention_function!, n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N
     if isanyknown(causalvar)
         throw(ValueAlreadyKnownError("You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvar"))
     end
-    result = simulate!(intervention_function!, n, causalvar)
+    result = simulate!(strategy, intervention_function!, n, causalvar)
     refresh!(causalvar)
     return result
 end
-simulate(intervention_function!, n::Int, causalvar::AbstractCausalVariable...) = simulate(intervention_function!, n, causalvar)
-simulate(n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate(() -> (), n, causalvar)
-simulate(n::Int, causalvar::AbstractCausalVariable...) = simulate(n, causalvar)
+simulate(strategy::ResolveStrategy, intervention_function!, n::Int, causalvar::AbstractCausalVariable...) = simulate(strategy, intervention_function!, n, causalvar)
+simulate(strategy::ResolveStrategy, n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate(strategy, () -> (), n, causalvar)
+simulate(strategy::ResolveStrategy, n::Int, causalvar::AbstractCausalVariable...) = simulate(strategy, n, causalvar)
+simulate(intervention_function!::Function, strategy::ResolveStrategy, args...) = simulate(strategy, intervention_function!, args...) # do-block form
+
+simulate(intervention_function!, causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate(Serial(), intervention_function!, causalvar)
+simulate(intervention_function!, causalvar::AbstractCausalVariable...) = simulate(Serial(), intervention_function!, causalvar)
+simulate(causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate(Serial(), causalvar)
+simulate(causalvar::AbstractCausalVariable...) = simulate(Serial(), causalvar)
+simulate(intervention_function!, n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate(Serial(), intervention_function!, n, causalvar)
+simulate(intervention_function!, n::Int, causalvar::AbstractCausalVariable...) = simulate(Serial(), intervention_function!, n, causalvar)
+simulate(n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N = simulate(Serial(), n, causalvar)
+simulate(n::Int, causalvar::AbstractCausalVariable...) = simulate(Serial(), n, causalvar)
 
 """
     invalidate!(parent::CausalVariable, child::CausalVariable)
@@ -491,6 +546,7 @@ Base.:|(x::CausalVariable, y::CausalVariable{<:Union{Bool, Missing}}) = given(x,
 
 include(joinpath(@__DIR__, "CausifyMacro.jl"))
 include(joinpath(@__DIR__, "Populations.jl"))
+include(joinpath(@__DIR__, "Threaded.jl"))
 # include(joinpath(@__DIR__, "Probabilities.jl"))
 
 end  # module Causifyxion

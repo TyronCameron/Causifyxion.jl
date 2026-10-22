@@ -167,3 +167,15 @@ end
     @test isapprox(p_b_given_a, 0.9; atol = 0.05)
 end
 
+
+@testset "resolve! draws a shared dependency once" begin
+    # p reaches c directly and through a; both copies of c are on the walk's stack before either resolves
+    calls = Ref(0)
+    c = causify(() -> (calls[] += 1; rand()))
+    a = @causify c + 1
+    p = causify((c, a) -> (c, a), c, a)
+
+    vc, va = resolve!(p)
+    @test calls[] == 1
+    @test va == vc + 1
+end
