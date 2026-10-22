@@ -1,26 +1,62 @@
 using ReLint: ReLint
 
-const ENFORCED = [
-    "show",
-    "bare using",
-    "non-const untyped global",
-    "unreachable branch",
-    "static threads",
-    "initializing with `nthreads`",
-    "@async",
-    "unsafe_ function",
-    "uv",
+const EXCLUDED = [
+    "in",
+    "haskey",
+    "equal",
+    "unsafe-logging",
+    "unsafe-assert",
+    "interpolation in `@warnv_safe_to_log`",
+    "TODO",
+    "TODO PR",
+    "noinline with non-literal/identifier args",
+    "RelPath",
+    "RelPath split_path",
+    "RelPath drop_first",
+    "RelPath relpath_from_signature",
+    "remove_page",
+    "no import RAICode",
+    "initializing with `is_local_deployment`",
+    "return in anonymous function",
+    "@generated",
+    "Task",
+    "no import",
 ]
-const ADVISORY = collect(keys(ReLint.RECOMMENDATIONS))
 
-rules = [rule for rule in ReLint.ALL_RULES if rule.name in ENFORCED || rule.name in ADVISORY]
-missing_rules = setdiff(ENFORCED, [rule.name for rule in rules])
-isempty(missing_rules) || error("ReLint no longer has these rules: $(join(missing_rules, ", "))")
+const ADVISORY = [
+    "splatting",
+    "@inbounds",
+    "@sync",
+    "@threads",
+    "yield",
+    "sleep",
+    "unlock",
+    "ccall",
+    "@cfunction",
+    "finalizer",
+    "isnothing",
+]
 
-report = ReLint.LintGlobalReport()
-for folder in filter(isdir, ARGS)
-    ReLint.run_lint(folder; result = report, context = ReLint.LintContext(rules))
+rule_names = Set(rule.name for rule in ReLint.ALL_RULES)
+unknown = setdiff(vcat(EXCLUDED, ADVISORY), rule_names)
+isempty(unknown) || error("ReLint no longer has these rules: $(join(unknown, ", "))")
+
+enforced = [rule for rule in ReLint.ALL_RULES if !(rule.name in EXCLUDED) && !(rule.name in ADVISORY)]
+advisory = [rule for rule in ReLint.ALL_RULES if rule.name in ADVISORY]
+
+function lint(rules, folders)
+    report = ReLint.LintGlobalReport()
+    for folder in filter(isdir, folders)
+        ReLint.run_lint(folder; result = report, context = ReLint.LintContext(rules))
+    end
+    return report
 end
-failures = report.violations_count + report.fatal_violations_count
-println("\nReLint: $(failures) violation(s), $(report.recommendations_count) recommendation(s) across $(report.files_count) file(s)")
-exit(failures == 0 ? 0 : 1)
+
+println("Enforced rules")
+failures = lint(enforced, ARGS)
+println("\nAdvisory rules")
+advice = lint(advisory, ARGS)
+
+failure_count = failures.violations_count + failures.fatal_violations_count + failures.recommendations_count
+println("\nReLint: $(failure_count) failure(s), $(advice.recommendations_count) advisory note(s)")
+exit(failure_count == 0 ? 0 : 1)
