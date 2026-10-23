@@ -7,7 +7,7 @@
         z = replicate(y)
         @test z isa CausalVariable
         @test z !== y
-        @test isindependent(z, x) # replicate gives z its own fresh copy of x, not the original
+        @test isindependent(z, x)
 
         setvalue!(x, 0.5)
         resolve!(y)
@@ -42,7 +42,7 @@
         z_tuple = replicate(y, (x,))
 
         setvalue!(x, 0.7)
-        @test resolve!(z_vararg) ≈ 0.49 # both forms share the same kept ancestor x
+        @test resolve!(z_vararg) ≈ 0.49
         @test resolve!(z_tuple) ≈ 0.49
     end
 end
@@ -57,7 +57,7 @@ end
         @test length(zs) == 3
         @test all(z -> z isa CausalVariable, zs)
         @test all(z -> z !== y, zs)
-        @test length(Set(zs)) == 3  # pairwise distinct objects
+        @test length(Set(zs)) == 3
     end
 
     @testset "with keep: shared ancestor across all replicas" begin
@@ -72,7 +72,7 @@ end
         zs_tuple = replicate(2, y, (x,))
 
         setvalue!(x, 0.6)
-        @test all(z -> resolve!(z) ≈ 0.36, zs_vararg) # both forms share the same kept ancestor x
+        @test all(z -> resolve!(z) ≈ 0.36, zs_vararg)
         @test all(z -> resolve!(z) ≈ 0.36, zs_tuple)
     end
 end

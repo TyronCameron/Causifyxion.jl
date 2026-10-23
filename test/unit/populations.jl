@@ -8,7 +8,7 @@
         @test length(resolve!(pop)) == 100
 
         pop_k = population(100, x; k = 3)
-        @test length(resolve!(pop_k)) == 100 # k is just an internal parallelism knob, output size is unaffected
+        @test length(resolve!(pop_k)) == 100
 
         @test_throws ArgumentError population(-1, x)
         @test_throws ArgumentError population(10, x; k = 0)
@@ -39,7 +39,6 @@
         @test all(==(1.0), samples)
         @test isknown(pop)
 
-        # Cached: a second resolve! returns the identical object, no resampling
         samples2 = resolve!(pop)
         @test samples2 === samples
     end
@@ -78,7 +77,6 @@
         @test all(s -> s isa Bool, samples)
         @test isapprox(sum(samples) / length(samples), 0.5; atol = 0.05)
 
-        # Not every replica just repeats one fixed value across all its draws
         @test length(Set(samples)) == 2
     end
 end

@@ -106,7 +106,6 @@ end
     @test z isa CausalVariable
     @test eltype(z) === Float64
 
-    # parity: the vararg form is equally type-stable
     w = @inferred causify(_tuple_add, x, y)
     @test w isa CausalVariable
     @test eltype(w) === Float64

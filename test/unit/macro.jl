@@ -125,20 +125,18 @@ end
     g(x) = @causify x + 1.0
     @test (@inferred g(x)) isa CausalVariable
     @test eltype(g(x)) === Float64
-    h(a, b) = @causify a + b # no-causals path collapses to plain evaluation
+    h(a, b) = @causify a + b
     @test @inferred(h(1.0, 2)) === 3.0
 end
 
 @testset "Dependency detection for AbstractCausalVariable subtypes" begin
-    # Population is an AbstractCausalVariable but not a CausalVariable -- @causify must
-    # still recognize it as a real dependency rather than an inert captured constant.
     x = causify(() -> 1.0)
     pop = population(5, x)
-    resolve!(pop) # Population must already be known before being used as a dependency here
+    resolve!(pop)
 
     z = @causify sum(pop)
 
     @test z isa CausalVariable
-    @test dependson(z, pop) # captured as a real dependency, not evaluated eagerly as a constant
-    @test resolve!(z) == 5.0    # 5 draws of a constant-1.0 resolver, summed
+    @test dependson(z, pop)
+    @test resolve!(z) == 5.0
 end

@@ -40,6 +40,21 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  relint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1'
+          arch: x64
+      - uses: julia-actions/cache@v2
+      - name: Install ReLint
+        run: julia --project=@relint -e 'using Pkg; Pkg.add(url="https://github.com/RelationalAI-oss/ReLint.jl")'
+      - name: Run ReLint
+        run: julia --project=@relint .github/lint/relint.jl src
+
   benchmark:
     if: github.event_name == 'pull_request'
     needs: test

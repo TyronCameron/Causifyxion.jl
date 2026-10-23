@@ -4,8 +4,9 @@ Causifyxion is a library for creating causally-related variables, and sampling f
 """
 module Causifyxion
 
-using Taproots
-using SumTypes
+using Taproots: Taproots, children, findtraces, isleaf, isparent, leaves, pluck,
+    postorder, preorder, setchildren!
+using SumTypes: SumTypes, @cases, @sum_type
 using Distributions: Distribution
 
 export CausalVariable,
@@ -489,11 +490,11 @@ This extends the doman of `x` into Union{T, Missing}, and enables rejection samp
 given(x::CausalVariable, y::CausalVariable{<:Union{Bool, Missing}}) = causify((x,y) -> y === true ? x : missing, x, y)
 Base.:|(x::CausalVariable, y::CausalVariable{<:Union{Bool, Missing}}) = given(x, y)
 
-include(joinpath(@__DIR__, "CausifyMacro.jl"))
-include(joinpath(@__DIR__, "Populations.jl"))
-# include(joinpath(@__DIR__, "Probabilities.jl"))
+include("CausifyMacro.jl")
+include("Populations.jl")
+# include("Probabilities.jl")
 
-end  # module Causifyxion
+end
 
 
 

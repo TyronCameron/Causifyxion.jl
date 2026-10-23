@@ -14,10 +14,10 @@
 
         invalidate!(z, x)
 
-        @test isunknown(z) # the parent itself -- this is the case the fix addresses
-        @test isunknown(y) # intermediate node on the x -> z path
-        @test isunknown(x) # the child argument
-        @test isknown(ϵ)   # not on any path between z and x, must stay untouched
+        @test isunknown(z)
+        @test isunknown(y)
+        @test isunknown(x)
+        @test isknown(ϵ)
     end
 
     @testset "invalidate! with parent == child" begin
@@ -32,7 +32,7 @@
         invalidate!(x, x)
 
         @test isunknown(x)
-        @test isknown(y) # unaffected -- invalidating x alone doesn't cascade upward to its dependents
+        @test isknown(y)
         @test isknown(z)
         @test isknown(ϵ)
     end
@@ -48,7 +48,7 @@
         resolve!(d)
         @test isknown(a) && isknown(b) && isknown(c) && isknown(d)
 
-        invalidate!(d, a) # two routes from d to a: d->b->a and d->c->a, both must be invalidated
+        invalidate!(d, a)
 
         @test isunknown(a)
         @test isunknown(b)
@@ -61,12 +61,11 @@
         setvalue!(x, 5.0)
         @test isknown(x)
 
-        @test setunknown!(x) === x # returns the causal variable itself, same contract as setvalue!
+        @test setunknown!(x) === x
         @test isunknown(x)
 
         @test_throws ValueUnknownError getvalue(x)
 
-        # non-recursive: unlike refresh!, setunknown! doesn't touch dependencies
         p = causify(() -> 2.0)
         child = causify(p2 -> p2 * 10, p)
         resolve!(child)
@@ -74,7 +73,7 @@
 
         setunknown!(child)
         @test isunknown(child)
-        @test isknown(p) # p is untouched -- contrast with refresh!, which would also unset p
+        @test isknown(p)
     end
 
     @testset "invalidate! interacts correctly with resolve!/refresh! afterward" begin
@@ -91,11 +90,11 @@
         invalidate!(z, x)
         resolve!(z)
 
-        @test getvalue(ϵ) == ϵ_val # independent value preserved, it was never set unknown
+        @test getvalue(ϵ) == ϵ_val
         @test getvalue(z) ≈ getvalue(x) + getvalue(y) + getvalue(x)*getvalue(y) + getvalue(ϵ)
 
         refresh!(z)
-        @test isunknown(ϵ) # refresh! clears everything, unlike invalidate!'s scoped behavior
+        @test isunknown(ϵ)
     end
 
 end
