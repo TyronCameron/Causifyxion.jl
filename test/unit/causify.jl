@@ -1,20 +1,16 @@
 
 @testset "Causify" begin 
 
-    # first way defining a causal variable
     x = causify(Normal(0,1))
     @test x isa CausalVariable
     @test eltype(x) <: Real
 
-    # second way, depening on the first
-    # defines y to be x^2
     y = causify(x) do x 
         x^2
     end 
     @test y isa CausalVariable
     @test eltype(y) <: Real
 
-    # third way, defines z to be x + y, and type hints at z's eltype. 
     z = causify(Float64, x, y) do x, y 
         x + y 
     end 
@@ -58,7 +54,7 @@ end
 
     @test getvalue(y) == 10000
     @test dependson(y, x)
-    @test !dependson(x, y) # dependency is directional: x does not depend on y
+    @test !dependson(x, y)
 
 end
 
@@ -70,7 +66,7 @@ end
     fresh_sample1 = simulate!(y)
     fresh_sample2 = simulate!(y)
 
-    @test fresh_sample1 != fresh_sample2 # these are 100% fresh samples
+    @test fresh_sample1 != fresh_sample2
 
     rigged_value = simulate!(y) do
         setvalue!(x, 0.5)
@@ -85,12 +81,12 @@ end
         x^2
     end 
 
-    tup = simulate!(5, x, y) # first column = 5 fresh samples of x, second column = 5 fresh samples of y; those samples are consistent in each row
+    tup = simulate!(5, x, y)
     
     @test tup isa Tuple
 
     xvals, yvals = tup
-    @test all(xvals .^ 2 .≈ yvals) # every value in column 1 squared equals every value in column 2
+    @test all(xvals .^ 2 .≈ yvals)
 
     rigged_tuple = simulate!(5, x, y) do
         setvalue!(x, 0.5)
@@ -125,8 +121,8 @@ end
     end
     @test !isindependent(x1, z)
     @test !isindependent(z, x1)
-    @test Causifyxion.degree(x1) == 0    # a leaf has no dependencies
-    @test Causifyxion.degree(z) == 1     # z depends directly on x1
+    @test Causifyxion.degree(x1) == 0
+    @test Causifyxion.degree(z) == 1
 
     s = causify(Normal(0,1))
     x = causify(x1, s) do x1, s
@@ -135,8 +131,8 @@ end
     a = causify(s) do s
         s + 1
     end
-    @test !isindependent(x, a) # share common cause s
-    @test isindependent(x1, a) # a doesn't involve x1 at all
+    @test !isindependent(x, a)
+    @test isindependent(x1, a)
 end
 
 @testset "Conditional probability (given / |)" begin
@@ -145,9 +141,8 @@ end
         rand(Bernoulli(a ? 0.9 : 0.1))
     end
 
-    conditioned = B | A # B's value when A is true, else missing
+    conditioned = B | A
 
-    # `|` is sugar for `given` -- exercise `given` directly too, and confirm they agree
     setvalue!(A, true)
     setvalue!(B, false)
     @test resolve!(given(B, A)) === false

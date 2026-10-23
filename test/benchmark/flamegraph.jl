@@ -6,7 +6,6 @@ function profile_test(n, f, example)
             f(example)
         end
     catch e
-        #nothing
     end
 end
 
@@ -19,8 +18,3 @@ end
 
 
 single_flame_graph(:causifyxion, :deep_pipeline)
-
-# impl, sit = :causifyxion, :deep_pipeline
-# example = get_func(:init, sit)()
-# func = get_func(impl, sit)
-# @report_opt func(example)

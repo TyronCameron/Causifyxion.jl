@@ -1,14 +1,19 @@
 
-# Helpers to create a CausalVariable from every symbol.
-# These are written as dispatch-based tuple recursions so the whole pipeline is type-inferrable.
+"""
+    _causals(t::Tuple)
 
-# Select the CausalVariables out of a tuple
+The `CausalVariable`s in `t`, selected by tuple recursion so the result is type-inferrable.
+"""
 @inline _causals(t::Tuple{}) = ()
 @inline _causals(t::Tuple) = _causals_first(first(t), Base.tail(t))
 @inline _causals_first(x::AbstractCausalVariable, rest::Tuple) = (x, _causals(rest)...)
 @inline _causals_first(::Any, rest::Tuple) = _causals(rest)
 
-# Rebuild `deps`, replacing each CausalVariable with the next resolved value from `args`
+"""
+    _merge_args(deps::Tuple, args::Tuple)
+
+Rebuilds `deps`, replacing each `CausalVariable` with the next resolved value from `args`, by tuple recursion so the result is type-inferrable.
+"""
 @inline _merge_args(::Tuple{}, ::Tuple{}) = ()
 @inline _merge_args(deps::Tuple, args::Tuple) = _merge_first(first(deps), Base.tail(deps), args)
 @inline _merge_first(::AbstractCausalVariable, rest::Tuple, args::Tuple) = (first(args), _merge_args(rest, Base.tail(args))...)
@@ -113,7 +118,6 @@ macro causify(args...)
     return esc(new_expr) 
 end 
 
-# Helper
 function _causify(expr, settings)
     expr isa Expr && expr.head == :block &&
         return _causify_block(expr, settings)
@@ -122,7 +126,11 @@ function _causify(expr, settings)
     return _causify_expr(expr, settings)
 end
 
-# Rule 1: Causify expressions 
+"""
+    _causify_expr(expr, settings)
+
+Wraps `expr` in a `causify` call depending on every symbol it contains.
+"""
 function _causify_expr(expr, settings)
     if !(expr isa Expr) && :constants ∉ settings return expr end
     sym_tuple = Expr(:tuple, filter(e -> e isa Symbol && occursin(r"^[a-zA-Z_]", string(e)), collect(leaves(expr)))...)
@@ -130,13 +138,21 @@ function _causify_expr(expr, settings)
     return :($target($sym_tuple -> $expr, $sym_tuple...))
 end
 
-# Rule 2: Allow assignment statements through
+"""
+    _causify_assignment(expr, settings)
+
+Causifies the right-hand side of an assignment, keeping the assignment itself.
+"""
 function _causify_assignment(expr, settings)
     args = _causify(expr.args[2], settings)
     return :($(expr.args[1]) = $args)
 end
 
-# Rule 3: Allow blocks of code through
+"""
+    _causify_block(expr, settings)
+
+Causifies the assignments, nested blocks and final expression of a block, passing every other statement through.
+"""
 function _causify_block(expr, settings)
     new_exprs = []
     for (i,e) in enumerate(expr.args)
@@ -151,7 +167,11 @@ function _causify_block(expr, settings)
     return Expr(:block, new_exprs...)
 end
 
-# Rule 4: Separate out symbols / flags
+"""
+    _settings_and_expr(args...)
+
+Splits the arguments of `@causify` into its settings (symbols such as `constants`) and the expression to causify.
+"""
 function _settings_and_expr(args...)
     settings = Set{Symbol}()
     expr = args[end]

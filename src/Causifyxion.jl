@@ -17,10 +17,7 @@ export CausalVariable,
     resolve!, refresh!, simulate!, simulate, invalidate!,
     causify, @causify, given,
     isexclusive, isexhaustive, isbasis,
-    # degree,
     replicate, Population, population
-    # Tally, tally, total, EmpiricalDistribution, distribution,
-    # cdf, mass, pdf, logpdf, support, probs, insupport, quantile, copula
 
 abstract type AbstractCausalVariable end 
 
@@ -492,9 +489,8 @@ Base.:|(x::CausalVariable, y::CausalVariable{<:Union{Bool, Missing}}) = given(x,
 
 include("CausifyMacro.jl")
 include("Populations.jl")
-# include("Probabilities.jl")
 
-end  # module Causifyxion
+end
 
 
 
