@@ -43,8 +43,8 @@ samples = resolve!(pop) # a Vector{Float64} of 10,000 independent draws of x
 ```
 """
 function population(n::Int, causalvar::AbstractCausalVariable; k::Int = Threads.nthreads())
-    n >= 0 || throw(ArgumentError("n must be non-negative, got $(n)"))
-    k >= 1 || throw(ArgumentError("k must be at least 1, got $(k)"))
+    n >= 0 || throw(ArgumentError("n must be non-negative, got $n"))
+    k >= 1 || throw(ArgumentError("k must be at least 1, got $k"))
     T = eltype(causalvar)
     replicas = AbstractCausalVariable[replicate(causalvar) for _ in 1:k]
     return Population{T}(replicas, n, Ref{Possible{Vector{T}}}(Unknown))

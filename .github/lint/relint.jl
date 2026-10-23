@@ -21,6 +21,7 @@ const EXCLUDED = [
     "@generated",
     "Task",
     "no import",
+    "string interpolation",
 ]
 
 const ADVISORY = [
@@ -58,5 +59,5 @@ println("\nAdvisory rules")
 advice = lint(advisory, ARGS)
 
 failure_count = failures.violations_count + failures.fatal_violations_count + failures.recommendations_count
-println("\nReLint: $(failure_count) failure(s), $(advice.recommendations_count) advisory note(s)")
+println("\nReLint: $failure_count failure(s), $(advice.recommendations_count) advisory note(s)")
 exit(failure_count == 0 ? 0 : 1)

@@ -17,7 +17,10 @@ export CausalVariable,
     resolve!, refresh!, simulate!, simulate, invalidate!,
     causify, @causify, given,
     isexclusive, isexhaustive, isbasis,
+    # degree,
     replicate, Population, population
+    # Tally, tally, total, EmpiricalDistribution, distribution,
+    # cdf, mass, pdf, logpdf, support, probs, insupport, quantile, copula
 
 abstract type AbstractCausalVariable end 
 
@@ -122,7 +125,7 @@ causify(resolver, dependencies::AbstractCausalVariable...) = causify(resolver, d
 Returns the value that is wrapped within the causalvar.
 """
 getvalue(causalvar::AbstractCausalVariable) = @cases causalvar.value[] begin 
-    Unknown => throw(ValueUnknownError("Can't get the value of an unknown value! Perhaps call resolve!(your_variable) first. The variable you attempted to get the value of was $(causalvar)"))
+    Unknown => throw(ValueUnknownError("Can't get the value of an unknown value! Perhaps call resolve!(your_variable) first. The variable you attempted to get the value of was $causalvar"))
     Known(x) => x
 end
 
@@ -370,7 +373,7 @@ If you encounter errors, try calling `refresh!` before running this.
 """
 function simulate(intervention_function!, causalvar::NTuple{N,AbstractCausalVariable}) where N
     if isanyknown(causalvar)
-        throw(ValueAlreadyKnownError("You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $(causalvar)"))
+        throw(ValueAlreadyKnownError("You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvar"))
     end
     intervention_function!()
     values = resolve!(causalvar)
@@ -383,7 +386,7 @@ simulate(causalvar::AbstractCausalVariable...) = simulate(causalvar)
 
 function simulate(intervention_function!, n::Int, causalvar::NTuple{N,AbstractCausalVariable}) where N
     if isanyknown(causalvar)
-        throw(ValueAlreadyKnownError("You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $(causalvar)"))
+        throw(ValueAlreadyKnownError("You cannot call `simulate` on variables with known values. Instead call `simulate!` or `refresh!` your variables first. CausalVariable: $causalvar"))
     end
     result = simulate!(intervention_function!, n, causalvar)
     refresh!(causalvar)
@@ -489,6 +492,7 @@ Base.:|(x::CausalVariable, y::CausalVariable{<:Union{Bool, Missing}}) = given(x,
 
 include("CausifyMacro.jl")
 include("Populations.jl")
+# include("Probabilities.jl")
 
 end
 

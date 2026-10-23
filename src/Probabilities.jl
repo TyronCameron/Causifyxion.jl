@@ -39,6 +39,27 @@ end
 total(tally::Tally) = sum(tally.counts)
 
 # ---------------------------------------------------------------------------
+# Heuristics
+# ---------------------------------------------------------------------------
+
+# """
+#     is_continuous_heuristic(tally::Tally; n = 1000, p = 0.995)
+
+# A heuristic to determine continuity of a sample. It returns true when the sample is large and almost every observation is a distinct value.
+# """
+# is_continuous_heuristic(tally::Tally; n = 1000, p = 0.995) =
+#     total(tally) > n && length(tally.values) > p * total(tally)
+
+# is_strictly_increasing(vec) = all(vec[begin:end-1] .< vec[begin+1:end])
+# is_strictly_decreasing(vec) = all(vec[begin:end-1] .> vec[begin+1:end])
+# is_unbounded_upwards_heuristic(sample; n = 1000, p = 0.995, k = 3, ϵ = 1) = 
+#     length(sample) > n && is_strictly_increasing(map(a -> max(first(sample, a)), n/k:n/k:n))
+# is_unbounded_downwards_heuristic(sample; n = 1000, p = 0.995, k = 3, ϵ = 1) = 
+#     length(sample) > n && is_strictly_decreasing(map(a -> min(first(sample, a)), n/k:n/k:n))
+# is_unbounded_heuristic(sample; n = 1000, p = 0.995, k = 3, ϵ = 1) = 
+    # is_unbounded_upwards_heuristic(sample) && is_unbounded_downwards_heuristic(sample)
+
+# ---------------------------------------------------------------------------
 # Empirical Probability Mass
 # ---------------------------------------------------------------------------
 
