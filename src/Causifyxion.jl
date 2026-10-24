@@ -4,7 +4,7 @@ Causifyxion is a library for creating causally-related variables, and sampling f
 """
 module Causifyxion
 
-using Taproots: Taproots, children, findtraces, isleaf, isparent, leaves, pluck,
+using Taproots: Taproots, AllPaths, children, findtraces, isleaf, isparent, leaves, pluck,
     postorder, preorder, setchildren!
 using SumTypes: SumTypes, @cases, @sum_type
 using Distributions: Distribution
@@ -234,8 +234,8 @@ second_sample = resolve!(x)
 """
 function resolve!(causalvar::AbstractCausalVariable)
     if isknown(causalvar) return getvalue(causalvar) end
-    for node in postorder(causalvar; connector = (parent, child) -> isunknown(child))
-        _resolve_single_node!(node)
+    for node in postorder(causalvar; pathset = AllPaths, connector = (parent, child) -> isunknown(child))
+        isunknown(node) && _resolve_single_node!(node)
     end 
     return getvalue(causalvar)
 end
