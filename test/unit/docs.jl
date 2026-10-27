@@ -207,4 +207,21 @@ using Dates
         @test isknown(pop)
     end
 
+    @testset "Monty Hall" begin
+        car = causify(DiscreteUniform(1, 3))
+        pick = causify(DiscreteUniform(1, 3))
+        host = @causify rand(setdiff(1:3, (car, pick)))
+        swap = @causify only(setdiff(1:3, (pick, host)))
+        wins = @causify swap == car
+
+        outcomes = resolve!(population(100_000, wins))
+        @test isapprox(sum(outcomes) / length(outcomes), 2/3; atol = 0.02)
+
+        saw = @causify pick == 1 && host == 3
+        car_behind_2 = @causify car == 2
+
+        outcomes = resolve!(population(100_000, car_behind_2 | saw))
+        @test isapprox(sum(skipmissing(outcomes)) / count(!ismissing, outcomes), 2/3; atol = 0.03)
+    end
+
 end
