@@ -101,29 +101,33 @@ It is crucial that this package mutates the state of Causal Variables, and varia
 
 ## Example: the Monty Hall problem
 
-You pick one of three doors, the host opens a different door hiding a goat, and you switch to the remaining door. What is the probability that you win the car?
+You pick door 1, the host opens a different door hiding a goat, and you either stay or switch. What is the probability that you win the car?
 
 ```julia
 using Distributions
 
-car  = causify(DiscreteUniform(1, 3))
-pick = causify(DiscreteUniform(1, 3))
-host = @causify rand(setdiff(1:3, (car, pick)))
-swap = @causify only(setdiff(1:3, (pick, host)))
-wins = @causify swap == car
+car = causify(DiscreteUniform(1, 3))
+host = @causify rand(setdiff(1:3, (car, 1)))
+final_choice = @causify :constants 1
+wins = @causify final_choice == car
 
-outcomes = resolve!(population(100_000, wins))
-sum(outcomes) / length(outcomes) # ≈ 2/3
+stay = simulate(100_000, wins)
+sum(stay) / length(stay) # ≈ 1/3
+
+switch, _ = simulate(100_000, wins, host) do
+    h = resolve!(host)
+    not_host = only(setdiff(1:3, (1, h)))
+    setvalue!(final_choice, not_host)
+end
+sum(switch) / length(switch) # ≈ 2/3
 ```
 
-The graph is the problem statement. `population` resolves it many times over, and the answer is just the frequency of `wins`.
-
-To condition on exactly what you saw (you picked door 1 and the host opened door 3), use `|`. Samples which disagree with the observation become `missing`:
+Alternatively, instead of intervening, we can condition on what we saw (the host opened door 3) using `|`. Samples which disagree with the observation become `missing`:
 
 ```julia
-saw = @causify pick == 1 && host == 3
+saw = @causify host == 3
 car_behind_2 = @causify car == 2
 
-outcomes = resolve!(population(100_000, car_behind_2 | saw))
-sum(skipmissing(outcomes)) / count(!ismissing, outcomes) # ≈ 2/3
+outcomes = collect(skipmissing(simulate(100_000, car_behind_2 | saw)))
+sum(outcomes) / length(outcomes) # ≈ 2/3
 ```
