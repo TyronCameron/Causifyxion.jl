@@ -101,33 +101,42 @@ It is crucial that this package mutates the state of Causal Variables, and varia
 
 ## Example: the Monty Hall problem
 
-You pick door 1, the host opens a different door hiding a goat, and you either stay or switch. What is the probability that you win the car?
+In the classic Monty Hall problem, you are presented with 3 doors. Behind one is a car, and behind each of the other two is a goat. 
+You pick any door you want (we used door 1 without loss of generality below) and then the host reveals a different door which is guaranteed to have a goat behind it. 
+Is it in your best interest to switch doors? 
+
+We setup:
 
 ```julia
 using Distributions
 
 car = causify(DiscreteUniform(1, 3))
-host = @causify rand(setdiff(1:3, (car, 1)))
-final_choice = @causify :constants 1
-wins = @causify final_choice == car
+your_choice = @causify :constants 1
+host = @causify rand(setdiff(1:3, (car, your_choice)))
+wins = @causify your_choice == car
+```
 
-stay = simulate(100_000, wins)
+We have already created the causal diagram needed to answer the question, so we can just simulate the answers. 
+
+```julia
+stay = simulate(100_000, wins);
 sum(stay) / length(stay) # ≈ 1/3
 
 switch, _ = simulate(100_000, wins, host) do
-    h = resolve!(host)
-    not_host = only(setdiff(1:3, (1, h)))
-    setvalue!(final_choice, not_host)
-end
+    other_door = only(setdiff(1:3, (resolve!(your_choice), resolve!(host))))
+    setvalue!(your_choice, other_door)
+end;
 sum(switch) / length(switch) # ≈ 2/3
 ```
 
-Alternatively, instead of intervening, we can condition on what we saw (the host opened door 3) using `|`. Samples which disagree with the observation become `missing`:
+Alternatively, instead of intervening, we can condition on what we saw (the host opened door 3 for example) using our conditioning operator `|`. 
 
 ```julia
 saw = @causify host == 3
 car_behind_2 = @causify car == 2
 
-outcomes = collect(skipmissing(simulate(100_000, car_behind_2 | saw)))
+outcomes = collect(skipmissing(simulate(100_000, car_behind_2 | saw)));
 sum(outcomes) / length(outcomes) # ≈ 2/3
 ```
+
+This final conditioning operator uses rejection sampling and can give sparse information if the event upon which we condition is unlikely. 
