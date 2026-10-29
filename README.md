@@ -98,3 +98,36 @@ invalidate!(z, x) # invalidate all causal vars between `z` and `x` (taking every
 
 It is crucial that this package mutates the state of Causal Variables, and variables continue to have the same value until they are set as unknown. Used incorrectly, this is can cause spooky action at a distance. Treat the `!` functions as recursive mutations in this package. 
 
+
+## Example: the Monty Hall problem
+
+You pick door 1, the host opens a different door hiding a goat, and you either stay or switch. What is the probability that you win the car?
+
+```julia
+using Distributions
+
+car = causify(DiscreteUniform(1, 3))
+host = @causify rand(setdiff(1:3, (car, 1)))
+final_choice = @causify :constants 1
+wins = @causify final_choice == car
+
+stay = simulate(100_000, wins)
+sum(stay) / length(stay) # ≈ 1/3
+
+switch, _ = simulate(100_000, wins, host) do
+    h = resolve!(host)
+    not_host = only(setdiff(1:3, (1, h)))
+    setvalue!(final_choice, not_host)
+end
+sum(switch) / length(switch) # ≈ 2/3
+```
+
+Alternatively, instead of intervening, we can condition on what we saw (the host opened door 3) using `|`. Samples which disagree with the observation become `missing`:
+
+```julia
+saw = @causify host == 3
+car_behind_2 = @causify car == 2
+
+outcomes = collect(skipmissing(simulate(100_000, car_behind_2 | saw)))
+sum(outcomes) / length(outcomes) # ≈ 2/3
+```
