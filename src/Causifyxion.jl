@@ -18,7 +18,8 @@ export CausalVariable,
     causify, @causify, given,
     isexclusive, isexhaustive, isbasis,
     # degree,
-    replicate, Population, population
+    replicate, Population, population,
+    mutualinfo, shannonentropy, kldiv, independencetest
     # Tally, tally, total, EmpiricalDistribution, distribution,
     # cdf, mass, pdf, logpdf, support, probs, insupport, quantile, copula
 
@@ -492,6 +493,7 @@ Base.:|(x::CausalVariable, y::CausalVariable{<:Union{Bool, Missing}}) = given(x,
 
 include("CausifyMacro.jl")
 include("Populations.jl")
+include("Information.jl")
 # include("Probabilities.jl")
 
 end
