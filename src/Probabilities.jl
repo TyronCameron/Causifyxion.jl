@@ -78,7 +78,7 @@ tally(sample::AbstractVector) = Tally(_accumulate(sample, ones(Int, length(sampl
 """
     distribution(sample::AbstractVector)
     distribution(columns::AbstractVector...)
-    distribution(tally::Tally)
+    distribution(measure::EmpiricalMeasure)
     distribution(n::Int, causalvars::AbstractCausalVariable...)
 
 The empirical distribution of a sample. Several columns give the joint distribution of their rows, as tuples.
@@ -92,6 +92,7 @@ d((true, false)) # ≈ 0.5
 ```
 """
 distribution(t::Tally) = EmpiricalDistribution(t.values, t.counts ./ total(t), t.index)
+distribution(d::EmpiricalDistribution) = d
 distribution(sample::AbstractVector) = distribution(tally(sample))
 distribution(columns::AbstractVector...) = distribution(collect(zip(columns...)))
 distribution(columns::Tuple{Vararg{AbstractVector}}) = distribution(columns...)
